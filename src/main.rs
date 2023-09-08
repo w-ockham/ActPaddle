@@ -4,8 +4,6 @@ use esp_idf_hal::gpio::PinDriver;
 use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_svc::eventloop::*;
 use esp_idf_svc::log::EspLogger;
-use esp_idf_svc::mdns::EspMdns;
-
 use std::io::stdin;
 use std::sync::mpsc;
 use std::thread;
@@ -16,8 +14,8 @@ mod server;
 mod wifi;
 use crate::morse::Morse;
 use crate::param::KeyerParam;
+use crate::wifi::WiFiConnection;
 use crate::server::spawn_server;
-use crate::wifi::wifi_connect;
 use log::*;
 
 #[toml_cfg::toml_config]
@@ -39,16 +37,14 @@ extern "C" {
 fn init_uart0() {
     use core::ptr::null_mut;
     use esp_idf_sys::{
-        esp_vfs_dev_uart_port_set_rx_line_endings, esp_vfs_dev_uart_use_driver, uart_driver_install,
+        esp_vfs_dev_uart_use_driver, uart_driver_install,
     };
     unsafe {
-        esp_vfs_dev_uart_port_set_rx_line_endings(
-            0,
-            esp_idf_sys::esp_line_endings_t_ESP_LINE_ENDINGS_CR,
-        );
-        esp_idf_sys::esp!(uart_driver_install(0, 256, 0, 0, null_mut(), 0))
+        esp_idf_sys::esp!(uart_driver_install(
+          esp_idf_sys::CONFIG_ESP_CONSOLE_UART_NUM.try_into().unwrap(),
+          256, 0, 1, null_mut(), 0))
             .expect("unable to initialize UART0 driver");
-        esp_vfs_dev_uart_use_driver(0);
+        esp_vfs_dev_uart_use_driver(esp_idf_sys::CONFIG_ESP_CONSOLE_UART_NUM.try_into().unwrap());
     }
 }
 
@@ -59,23 +55,25 @@ fn patches() {
 
     let c_buf: *const c_char = unsafe { esp_get_idf_version() };
     let c_str: &CStr = unsafe { CStr::from_ptr(c_buf) };
-    println!("ESP-IDF version = {}", c_str.to_str().unwrap());
+    info!("ESP-IDF version = {}", c_str.to_str().unwrap());
+    
+    #[cfg(target_arch = "xtensa")]
+    init_uart0();
 
     #[cfg(target_arch = "riscv32")]
     unsafe {
         init_usb();
     }
-    #[cfg(target_arch = "xtensa")]
-    init_uart0();
+
 }
 
 static LOGGER: EspLogger = EspLogger;
 
 fn main() -> anyhow::Result<()> {
-    patches();
-
     log::set_logger(&LOGGER).map(|()| LOGGER.initialize())?;
-    LOGGER.set_target_level("", log::LevelFilter::Info)?;
+    LOGGER.set_target_level("wifi", log::LevelFilter::Off)?;
+
+    patches();
 
     let peripherals = Peripherals::take().unwrap();
     let sysloop = EspSystemEventLoop::take()?;
@@ -88,15 +86,12 @@ fn main() -> anyhow::Result<()> {
     let (from_post, rx_post) = mpsc::channel::<KeyerParam>();
     let (from_serial, rx_serial) = mpsc::channel::<KeyerParam>();
 
-    let mut wifi = wifi_connect(
+    
+    let mut wifi = WiFiConnection::new(
         peripherals.modem,
-        sysloop.clone(),
-        CONFIG.wifi_ssid,
-        CONFIG.wifi_psk,
-    )?;
+        sysloop.clone());
 
-    let mut mdns = EspMdns::take()?;
-    mdns.set_hostname(CONFIG.hostname)?;
+    wifi.wifi_start_stn(CONFIG.hostname, CONFIG.wifi_ssid,CONFIG.wifi_psk)?;
 
     let _server = spawn_server(from_post);
 
@@ -109,19 +104,14 @@ fn main() -> anyhow::Result<()> {
             } else {
                 let mesg: Result<KeyerParam, serde_json::Error> = serde_json::from_str(&line);
                 if let Ok(mesg) = mesg {
-                    from_serial.send(mesg);
+                    let _ = from_serial.send(mesg);
                 } else {
                     print!("JSONError: {:?}", mesg);
                 }
             }
-            FreeRtos::delay_ms(10);
+            FreeRtos::delay_ms(5);
         }
     });
-
-    morse.set_wpm(40);
-    morse.play(true, &"OK".to_string());
-
-    let mut connecting = false;
 
     loop {
         let mut interp = |param: KeyerParam| {
@@ -165,20 +155,8 @@ fn main() -> anyhow::Result<()> {
             interp(msg);
         }
 
-        if !wifi.is_connected().unwrap() && !connecting {
-            connecting = true;
-            if let Err(_) = wifi.connect() {
-                connecting = false;
-                info!("connect failed.");
-            } else {
-                info!("connecting");
-                wifi.connect();
-            }
-        } else if wifi.is_connected().unwrap() && connecting {
-            info!("connected");
-            connecting = false;
-        }
+        wifi.wifi_loop()?;
 
-        FreeRtos::delay_ms(1);
+        FreeRtos::delay_ms(5);
     }
 }

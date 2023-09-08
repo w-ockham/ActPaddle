@@ -23,8 +23,8 @@ where
     const MSPERWPM: u32 = 1200; /* PARIS = 50 tick */
 
     pub fn new(mut pin_di: PINDI, mut pin_dah: PINDAH) -> Self {
-        pin_di.set_low();
-        pin_dah.set_low();
+        let _ = pin_di.set_low();
+        let _ = pin_dah.set_low();
         Self {
             pin_di,
             pin_dah,
@@ -119,14 +119,14 @@ where
         }
         match pin {
             MorseCode::Di => {
-                self.pin_di.set_high();
+                let _ = self.pin_di.set_high();
                 self.wait(tick);
-                self.pin_di.set_low();
+                let _ = self.pin_di.set_low();
             }
             MorseCode::Dah => {
-                self.pin_dah.set_high();
+                let _ = self.pin_dah.set_high();
                 self.wait(tick);
-                self.pin_dah.set_low();
+                let _ = self.pin_dah.set_low();
             }
         }
     }

@@ -1,4 +1,4 @@
-use anyhow::{Result};
+use anyhow::Result;
 use embedded_svc::http::Method;
 use embedded_svc::io::Write;
 use esp_idf_svc::http::server::*;
@@ -9,7 +9,7 @@ use log::*;
 use std::include_bytes;
 use std::sync::mpsc::Sender;
 
-pub fn spawn_server<'a>(tx: Sender<KeyerParam>) -> anyhow::Result<Box<EspHttpServer>> {
+pub fn spawn_server(tx: Sender<KeyerParam>) -> Result<Box<EspHttpServer>> {
     let server_cert_bytes: Vec<u8> = include_bytes!("../cert/cacert.pem").to_vec();
     let private_key_bytes: Vec<u8> = include_bytes!("../cert/prvtkey.pem").to_vec();
 
@@ -31,7 +31,7 @@ pub fn spawn_server<'a>(tx: Sender<KeyerParam>) -> anyhow::Result<Box<EspHttpSer
     server
         .fn_handler("/", Method::Get, |req| {
             let html = index_html();
-            req.into_ok_response()?.write_all(&html.as_bytes())?;
+            req.into_ok_response()?.write_all(html.as_bytes())?;
             Ok(())
         })?
         .fn_handler("/play", Method::Options, move |req| {
