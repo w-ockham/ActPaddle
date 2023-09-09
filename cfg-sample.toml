@@ -1,4 +1,6 @@
-[pemuact]
-wifi_ssid = ""
-wifi_psk = ""
-hostname = ""
+[actpaddle]
+#ap_ssid = "ActPaddle"
+#ap_pass = "actpaddle"
+#stn_ssid = ""
+#stn_pass = ""
+#hostname = "actpaddle"
