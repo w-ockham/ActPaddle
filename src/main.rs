@@ -1,30 +1,36 @@
-use core::ffi::c_char;
 use esp_idf_hal::delay::FreeRtos;
 use esp_idf_hal::gpio::PinDriver;
 use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_svc::eventloop::*;
 use esp_idf_svc::log::EspLogger;
+use log::*;
 use std::io::stdin;
 use std::sync::mpsc;
 use std::thread;
 
 mod morse;
+mod nvskey;
 mod param;
 mod server;
 mod wifi;
+
 use crate::morse::Morse;
+use crate::nvskey::NVSkey;
 use crate::param::KeyerParam;
-use crate::wifi::WiFiConnection;
 use crate::server::spawn_server;
-use log::*;
+use crate::wifi::WiFiConnection;
 
 #[toml_cfg::toml_config]
 pub struct Config {
+    #[default("ActPaddle")]
+    ap_ssid: &'static str,
+    #[default("actpaddle")]
+    ap_pass: &'static str,
     #[default("")]
-    wifi_ssid: &'static str,
+    stn_ssid: &'static str,
     #[default("")]
-    wifi_psk: &'static str,
-    #[default("")]
+    stn_pass: &'static str,
+    #[default("actpaddle")]
     hostname: &'static str,
 }
 
@@ -36,46 +42,34 @@ extern "C" {
 #[cfg(target_arch = "xtensa")]
 fn init_uart0() {
     use core::ptr::null_mut;
-    use esp_idf_sys::{
-        esp_vfs_dev_uart_use_driver, uart_driver_install,
-    };
+    use esp_idf_sys::{esp_vfs_dev_uart_use_driver, uart_driver_install};
     unsafe {
-        esp_idf_sys::esp!(uart_driver_install(
-          esp_idf_sys::CONFIG_ESP_CONSOLE_UART_NUM.try_into().unwrap(),
-          256, 0, 1, null_mut(), 0))
+        esp_idf_sys::esp!(uart_driver_install(0, 256, 0, 0, null_mut(), 0))
             .expect("unable to initialize UART0 driver");
-        esp_vfs_dev_uart_use_driver(esp_idf_sys::CONFIG_ESP_CONSOLE_UART_NUM.try_into().unwrap());
+        esp_vfs_dev_uart_use_driver(0);
     }
 }
 
 fn patches() {
     esp_idf_sys::link_patches();
-    use esp_idf_sys::esp_get_idf_version;
-    use std::ffi::CStr;
-
-    let c_buf: *const c_char = unsafe { esp_get_idf_version() };
-    let c_str: &CStr = unsafe { CStr::from_ptr(c_buf) };
-    info!("ESP-IDF version = {}", c_str.to_str().unwrap());
-    
     #[cfg(target_arch = "xtensa")]
     init_uart0();
-
     #[cfg(target_arch = "riscv32")]
     unsafe {
         init_usb();
     }
-
 }
 
 static LOGGER: EspLogger = EspLogger;
 
 fn main() -> anyhow::Result<()> {
+    patches();
+
     log::set_logger(&LOGGER).map(|()| LOGGER.initialize())?;
     LOGGER.set_target_level("wifi", log::LevelFilter::Off)?;
 
-    patches();
-
     let peripherals = Peripherals::take().unwrap();
+
     let sysloop = EspSystemEventLoop::take()?;
 
     let di = PinDriver::output(peripherals.pins.gpio3)?;
@@ -83,17 +77,27 @@ fn main() -> anyhow::Result<()> {
 
     let mut morse = Morse::new(di, dah);
 
-    let (from_post, rx_post) = mpsc::channel::<KeyerParam>();
-    let (from_serial, rx_serial) = mpsc::channel::<KeyerParam>();
+    let (tx_web, rx_web) = mpsc::channel::<KeyerParam>();
+    let (tx_web2, rx_web2) = mpsc::channel::<KeyerParam>();
+    let (tx_serial, rx_serial) = mpsc::channel::<KeyerParam>();
 
+
+    let mut nvs = NVSkey::new("actpaddle")?;
+
+    let stn_ssid = nvs.get_value("default_ssid", CONFIG.stn_ssid).unwrap();
+    let stn_passwd = nvs.get_value("default_passwd", CONFIG.stn_pass).unwrap();
     
-    let mut wifi = WiFiConnection::new(
-        peripherals.modem,
-        sysloop.clone());
+    let mut wifi = WiFiConnection::new(peripherals.modem, sysloop.clone()).unwrap();
+    
+    wifi.wifi_start(
+        CONFIG.hostname,
+        &stn_ssid,
+        &stn_passwd,
+        CONFIG.ap_ssid,
+        CONFIG.ap_pass,
+    ).unwrap();
 
-    wifi.wifi_start_stn(CONFIG.hostname, CONFIG.wifi_ssid,CONFIG.wifi_psk)?;
-
-    let _server = spawn_server(from_post);
+    let _server = spawn_server(tx_web, rx_web2);
 
     thread::spawn(move || {
         let reader = stdin();
@@ -104,12 +108,12 @@ fn main() -> anyhow::Result<()> {
             } else {
                 let mesg: Result<KeyerParam, serde_json::Error> = serde_json::from_str(&line);
                 if let Ok(mesg) = mesg {
-                    let _ = from_serial.send(mesg);
+                    let _ = tx_serial.send(mesg);
                 } else {
                     print!("JSONError: {:?}", mesg);
                 }
             }
-            FreeRtos::delay_ms(5);
+            FreeRtos::delay_ms(10);
         }
     });
 
@@ -147,8 +151,28 @@ fn main() -> anyhow::Result<()> {
             }
         };
 
-        if let Ok(msg) = rx_post.try_recv() {
-            interp(msg);
+        if let Ok(msg) = rx_web.try_recv() {
+            if msg.ssid.is_some() || msg.ssidlist.is_some() {
+                if let Some(ssid) = msg.ssid {
+                    if let Some(password) = msg.password {
+                        nvs.set_value("default_ssid", &ssid)?;
+                        nvs.set_value("default_passwd", &password)?;
+                        info!("SSID = {:?}", ssid);
+                        info!("Password= {:?}", password);
+                        FreeRtos::delay_ms(3000);
+                        unsafe { esp_idf_sys::esp_restart() };
+                    }
+                }
+                if msg.ssidlist.is_some() {
+                    let mut k = KeyerParam::default();
+                    if let Some(ssids) = wifi.get_ssidlist() {
+                        k.ssidlist = Some(ssids);
+                    }
+                    tx_web2.send(k)?;
+                }
+            } else {
+                interp(msg);
+            }
         }
 
         if let Ok(msg) = rx_serial.try_recv() {

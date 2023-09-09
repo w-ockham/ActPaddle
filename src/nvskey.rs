@@ -11,7 +11,6 @@ impl NVSkey {
         let nvs_default_partition: EspNvsPartition<NvsDefault> = EspDefaultNvsPartition::take()?;
         let nvs = match EspNvs::new(nvs_default_partition, namespace, true) {
             Ok(nvs) => {
-                info!("Got namespace {:?} from default partition", namespace);
                 nvs
             }
             Err(e) => panic!("Could't get namespace {:?}", e),
@@ -26,20 +25,17 @@ impl NVSkey {
             if let Some(v) = self.nvs.get_str(key, &mut buffer)? {
                 let mut v = v.to_string();
                 v.pop();
-                info!("key = {:?} size = {:?} value = {:?}", key, len, v);
                 Ok(v)
             } else {
                 bail!("Can't read from nvs key={:?}", key);
             }
         } else {
             self.nvs.set_str(key, default)?;
-            info!("set default value = {:?}", default.to_string());
             Ok(default.to_string())
         }
     }
 
     pub fn set_value(&mut self, key: &str, value: &str) -> Result<()> {
-        info!("Set key = {:?} value ={:?}", key, value);
         self.nvs.set_str(key, value)?;
         Ok(())
     }
