@@ -1,12 +1,19 @@
+use anyhow::Result;
 use esp_idf_hal::delay::FreeRtos;
 use esp_idf_hal::gpio::PinDriver;
 use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_svc::eventloop::*;
 use esp_idf_svc::log::EspLogger;
 use log::*;
+use smart_leds::SmartLedsWrite;
 use std::io::stdin;
 use std::sync::mpsc;
 use std::thread;
+
+#[cfg(any(board = "m5atom", board = "m5stamp"))]
+use ws2812_esp32_rmt_driver::driver::color::LedPixelColorGrbw32;
+#[cfg(any(board = "m5atom", board = "m5stamp"))]
+use ws2812_esp32_rmt_driver::{LedPixelEsp32Rmt, RGB8};
 
 mod morse;
 mod nvskey;
@@ -39,7 +46,7 @@ extern "C" {
     fn init_usb();
 }
 
-#[cfg(target_arch = "xtensa")]
+//#[cfg(target_arch = "xtensa")]
 fn init_uart0() {
     use core::ptr::null_mut;
     use esp_idf_sys::{esp_vfs_dev_uart_use_driver, uart_driver_install};
@@ -62,17 +69,39 @@ fn patches() {
 
 static LOGGER: EspLogger = EspLogger;
 
-fn main() -> anyhow::Result<()> {
+fn main() -> Result<()> {
     patches();
 
     log::set_logger(&LOGGER).map(|()| LOGGER.initialize())?;
     LOGGER.set_target_level("wifi", log::LevelFilter::Off)?;
 
     let peripherals = Peripherals::take().unwrap();
-
     let sysloop = EspSystemEventLoop::take()?;
 
+    #[cfg(board = "m5atom")]
+    let di = PinDriver::output(peripherals.pins.gpio33)?;
+    #[cfg(board = "m5atom")]
+    let dah = PinDriver::output(peripherals.pins.gpio23)?;
+    #[cfg(board = "m5atom")]
+    const LED_PIN : u32 = 27;
+    
+    #[cfg(board = "m5stamp")]
+    let di = PinDriver::output(peripherals.pins.gpio4)?;
+    #[cfg(board = "m5stamp")]
+    let dah = PinDriver::output(peripherals.pins.gpio3)?;
+    #[cfg(board = "m5stamp")]
+    const LED_PIN : u32 = 2;
+
+    #[cfg(any(board = "m5atom", board = "m5stamp"))]
+    let mut led = LedPixelEsp32Rmt::<RGB8, LedPixelColorGrbw32>::new(0, LED_PIN).unwrap();
+    #[cfg(any(board = "m5atom", board = "m5stamp"))]
+    let empty_color = std::iter::repeat(RGB8::default()).take(1);
+    #[cfg(any(board = "m5atom", board = "m5stamp"))]
+    let white_color = std::iter::repeat(RGB8{r:10,g:10,b:10}).take(1);
+    
+    #[cfg(board = "xiao-esp32c3")]
     let di = PinDriver::output(peripherals.pins.gpio3)?;
+    #[cfg(board = "xiao-esp32c3")]
     let dah = PinDriver::output(peripherals.pins.gpio2)?;
 
     let mut morse = Morse::new(di, dah);
@@ -81,21 +110,23 @@ fn main() -> anyhow::Result<()> {
     let (tx_web2, rx_web2) = mpsc::channel::<KeyerParam>();
     let (tx_serial, rx_serial) = mpsc::channel::<KeyerParam>();
 
-
     let mut nvs = NVSkey::new("actpaddle")?;
+    
+    if !CONFIG.stn_ssid.is_empty() {
+      nvs.set_ssid_passwd(CONFIG.stn_ssid, CONFIG.stn_pass);
+    }
 
-    let stn_ssid = nvs.get_value("default_ssid", CONFIG.stn_ssid).unwrap();
-    let stn_passwd = nvs.get_value("default_passwd", CONFIG.stn_pass).unwrap();
-    
-    let mut wifi = WiFiConnection::new(peripherals.modem, sysloop.clone()).unwrap();
-    
+    let stn_ssid_list = nvs.get_ssid_list();
+   
+    let mut wifi = WiFiConnection::new(peripherals.modem, sysloop.clone())?;
+
     wifi.wifi_start(
         CONFIG.hostname,
-        &stn_ssid,
-        &stn_passwd,
+        &stn_ssid_list,
         CONFIG.ap_ssid,
         CONFIG.ap_pass,
-    ).unwrap();
+    )
+    .unwrap();
 
     let _server = spawn_server(tx_web, rx_web2);
 
@@ -104,53 +135,21 @@ fn main() -> anyhow::Result<()> {
         loop {
             let mut line = String::new();
             if let Err(e) = reader.read_line(&mut line) {
-                print!("Error: {e}\r\n");
+                info!("Error: {e}");
             } else {
                 let mesg: Result<KeyerParam, serde_json::Error> = serde_json::from_str(&line);
                 if let Ok(mesg) = mesg {
+                    info!("STDIN= {:?}", mesg);
                     let _ = tx_serial.send(mesg);
                 } else {
-                    print!("JSONError: {:?}", mesg);
+                    info!("JSONError: {:?}", mesg);
                 }
             }
-            FreeRtos::delay_ms(10);
+            FreeRtos::delay_ms(100);
         }
     });
 
     loop {
-        let mut interp = |param: KeyerParam| {
-            if let Some(s) = param.wpm {
-                morse.set_wpm(s);
-            }
-
-            if let Some(r) = param.ratio {
-                morse.set_ratio(r);
-            }
-
-            if let Some(s) = param.letter_space {
-                morse.set_letter_space(s);
-            }
-
-            if let Some(s) = param.word_space {
-                morse.set_word_space(s);
-            }
-
-            if let Some(r) = param.reverse {
-                if r {
-                    morse.reverse();
-                } else {
-                    morse.normal();
-                }
-            }
-            if let Some(m) = param.to_paddle {
-                morse.play(true, &m);
-            }
-
-            if let Some(m) = param.to_straight {
-                morse.play(false, &m);
-            }
-        };
-
         if let Ok(msg) = rx_web.try_recv() {
             if msg.ssid.is_some() || msg.ssidlist.is_some() {
                 if let Some(ssid) = msg.ssid {
@@ -158,8 +157,7 @@ fn main() -> anyhow::Result<()> {
                         nvs.set_value("default_ssid", &ssid)?;
                         nvs.set_value("default_passwd", &password)?;
                         info!("SSID = {:?}", ssid);
-                        info!("Password= {:?}", password);
-                        FreeRtos::delay_ms(3000);
+                        FreeRtos::delay_ms(1000);
                         unsafe { esp_idf_sys::esp_restart() };
                     }
                 }
@@ -171,16 +169,23 @@ fn main() -> anyhow::Result<()> {
                     tx_web2.send(k)?;
                 }
             } else {
-                interp(msg);
+                morse.interp(&msg);
             }
         }
 
         if let Ok(msg) = rx_serial.try_recv() {
-            interp(msg);
+            println!("Received:{:?}", msg);
+            morse.interp(&msg);
         }
 
         wifi.wifi_loop()?;
-
-        FreeRtos::delay_ms(5);
+        #[cfg(any(board = "m5atom", board = "m5stamp"))]
+        if wifi.is_up() {
+          led.write(empty_color.clone())?;
+    
+        } else {
+          led.write(white_color.clone())?;
+        }
+        FreeRtos::delay_ms(100);
     }
 }

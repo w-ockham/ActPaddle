@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use embedded_svc::wifi::*;
 use esp_idf_hal::delay::FreeRtos;
 use esp_idf_hal::peripheral;
@@ -20,8 +20,8 @@ impl<'a> WiFiConnection<'a> {
         modem: impl peripheral::Peripheral<P = esp_idf_hal::modem::Modem> + 'static,
         sysloop: EspSystemEventLoop,
     ) -> Result<Self> {
-        //let nvs = EspDefaultNvsPartition::take()?;
-        let esp_wifi = EspWifi::<'static>::new(modem, sysloop.clone(), None /*Some(nvs)*/)?;
+        let nvs = None /*Some(EspDefaultNvsPartition::take().unwrap())*/;
+        let esp_wifi = EspWifi::<'static>::new(modem, sysloop.clone(), nvs)?;
         let mdns = EspMdns::take()?;
         Ok(Self {
             esp_wifi,
@@ -35,8 +35,7 @@ impl<'a> WiFiConnection<'a> {
     pub fn wifi_start(
         &mut self,
         host: &'a str,
-        stn_ssid: &'a str,
-        stn_pass: &'a str,
+        stn_ssid_list: &Option<Vec<(String, String)>>,
         ap_ssid: &'a str,
         ap_pass: &'a str,
     ) -> Result<()> {
@@ -51,9 +50,15 @@ impl<'a> WiFiConnection<'a> {
             ..Default::default()
         };
 
+        let ap_info = self.esp_wifi.scan().unwrap();
+        let ap_info = ap_info.sort_by_key(|&a|a.signal_strength);
+      
+
+        info!("AP Info = {:?}", ap_info);
+
         let stn_conf = ClientConfiguration {
-            ssid: stn_ssid.into(),
-            password: stn_pass.into(),
+            ssid: ssid.into(),
+            password: passwd.into(),
             auth_method: AuthMethod::WPA2Personal,
             ..Default::default()
         };
@@ -63,8 +68,6 @@ impl<'a> WiFiConnection<'a> {
         self.esp_wifi.set_configuration(&conf).unwrap();
         self.esp_wifi.start().unwrap();
 
-        let ap_info = self.esp_wifi.scan().unwrap();
-        info!("AP Info = {:?}",ap_info);
         self.ssidlist = Some(ap_info.into_iter().map(|ap| ap.ssid.to_string()).collect());
         self.host = Some(host);
         self.mdns.set_hostname(self.host.unwrap())?;
@@ -94,5 +97,9 @@ impl<'a> WiFiConnection<'a> {
             }
         }
         Ok(())
+    }
+
+    pub fn is_up(&self) -> bool {
+        self.ifup
     }
 }

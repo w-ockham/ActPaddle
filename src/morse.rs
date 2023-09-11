@@ -1,9 +1,14 @@
 use embedded_hal::digital::v2::OutputPin;
 use esp_idf_hal::delay::FreeRtos;
+use log::*;
+
+use crate::param::KeyerParam;
+
 pub enum MorseCode {
     Di,
     Dah,
 }
+
 pub struct Morse<PINDI, PINDAH> {
     pin_di: PINDI,
     pin_dah: PINDAH,
@@ -164,7 +169,7 @@ where
     }
 
     pub fn play(&mut self, paddle: bool, message: &String) {
-        println!("{message} ");
+        info!("{message} ");
         for c in message.chars() {
             match c {
                 ' ' => {
@@ -184,6 +189,34 @@ where
                     self.wait(self.tick * (self.letter_space));
                 }
             }
+        }
+    }
+
+    pub fn interp(&self, param: &KeyerParam) {
+        if let Some(s) = param.wpm {
+            self.set_wpm(s);
+        }
+        if let Some(r) = param.ratio {
+            self.set_ratio(r);
+        }
+        if let Some(s) = param.letter_space {
+            self.set_letter_space(s);
+        }
+        if let Some(s) = param.word_space {
+            self.set_word_space(s);
+        }
+        if let Some(r) = param.reverse {
+            if r {
+                self.reverse();
+            } else {
+                self.normal();
+            }
+        }
+        if let Some(m) = param.to_paddle {
+            self.play(true, &m);
+        }
+        if let Some(m) = param.to_straight {
+            self.play(false, &m);
         }
     }
 }
