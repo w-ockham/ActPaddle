@@ -1,5 +1,6 @@
 use anyhow::Result;
 use embedded_svc::wifi::*;
+use esp_idf_hal::delay::Delay;
 use esp_idf_hal::peripheral;
 use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::mdns::EspMdns;
@@ -7,7 +8,18 @@ use esp_idf_svc::wifi::*;
 use log::*;
 use std::collections::HashMap;
 
-pub struct WiFiConnection<'a> {
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum WiFiState {
+    Stopped,
+    Started,
+    Connected,
+    IfUp,
+}
+
+pub struct WiFiConnection<'a, F>
+where
+    F: FnMut(WiFiState),
+{
     esp_wifi: EspWifi<'static>,
     mdns: EspMdns,
     host: &'a str,
@@ -15,10 +27,14 @@ pub struct WiFiConnection<'a> {
     ap_pass: &'a str,
     saved_ap_list: Option<HashMap<String, String>>,
     scanned_ap_list: Option<Vec<String>>,
-    ifup: bool,
+    state: WiFiState,
+    handler: Option<F>,
 }
 
-impl<'a> WiFiConnection<'a> {
+impl<'a, F> WiFiConnection<'a, F>
+where
+    F: FnMut(WiFiState),
+{
     pub fn new(
         modem: impl peripheral::Peripheral<P = esp_idf_hal::modem::Modem> + 'static,
         sysloop: EspSystemEventLoop,
@@ -37,7 +53,8 @@ impl<'a> WiFiConnection<'a> {
             ap_pass,
             saved_ap_list: None,
             scanned_ap_list: None,
-            ifup: false,
+            state: WiFiState::Stopped,
+            handler: None,
         })
     }
 
@@ -79,7 +96,7 @@ impl<'a> WiFiConnection<'a> {
         };
 
         let mut stn_conf = ClientConfiguration::default();
-    
+
         if let Some(ap) = candidate {
             let ssid = ap.ssid.as_str();
             let passwd = self
@@ -90,12 +107,12 @@ impl<'a> WiFiConnection<'a> {
                 .unwrap()
                 .as_str();
             stn_conf = ClientConfiguration {
-              ssid: ssid.into(),
-              password: passwd.into(),
-              channel: Some(ap.channel),
-              ..Default::default()
+                ssid: ssid.into(),
+                password: passwd.into(),
+                channel: Some(ap.channel),
+                ..Default::default()
             }
-          };
+        };
 
         let conf = Configuration::Mixed(stn_conf, ap_conf);
         info!("Config = {:?}", conf);
@@ -111,8 +128,6 @@ impl<'a> WiFiConnection<'a> {
     pub fn ap_scan(&mut self) -> Vec<AccessPointInfo> {
         let mut ap_info = self.esp_wifi.scan().unwrap();
         ap_info.sort_by(|a, b| b.signal_strength.cmp(&a.signal_strength));
-        info!("AP Info = {:?}", ap_info);
-
         let aplist = ap_info.iter().map(|ap| ap.ssid.to_string()).collect();
         self.scanned_ap_list = if !ap_info.is_empty() {
             Some(aplist)
@@ -148,25 +163,41 @@ impl<'a> WiFiConnection<'a> {
             None
         }
     }
+
+    pub fn add_handler(&mut self, f: F) {
+        self.handler = Some(f);
+    }
+
     pub fn wifi_loop(&mut self) -> Result<()> {
+        let prev = self.state;
+        let mut delay = 200;
+
         if self.esp_wifi.is_started().is_ok() {
+            self.state = WiFiState::Started;
             if let Ok(connected) = self.esp_wifi.is_connected() {
-                if !connected {
-                    if self.esp_wifi.connect().is_err() {
-                        self.ifup = false;
+                if connected {
+                    self.state = WiFiState::Connected;
+                    delay = 500;
+                    if self.esp_wifi.is_up().unwrap() {
+                        self.state = WiFiState::IfUp;
                     }
-                } else if self.esp_wifi.is_up().unwrap() && !self.ifup {
-                    let ap_info = self.esp_wifi.ap_netif().get_ip_info();
-                    let sta_info = self.esp_wifi.sta_netif().get_ip_info();
-                    info!("AP Info: {:?}\nSTN Info: {:?}", ap_info, sta_info);
-                    self.ifup = true;
                 }
             }
         }
-        Ok(())
-    }
 
-    pub fn is_up(&self) -> bool {
-        self.ifup
+        if prev != self.state {
+            if self.handler.is_some() {
+                self.handler.as_mut().unwrap()(self.state);
+                if self.state == WiFiState::IfUp {
+                    let ap_info = self.esp_wifi.ap_netif().get_ip_info();
+                    let sta_info = self.esp_wifi.sta_netif().get_ip_info();
+                    info!("AP Info: {:?}\nSTN Info: {:?}", ap_info, sta_info);
+                }
+            }
+        } else if self.state == WiFiState::Started {
+            let _ = self.esp_wifi.connect();
+        }
+        Delay::delay_ms(delay);
+        Ok(())
     }
 }
