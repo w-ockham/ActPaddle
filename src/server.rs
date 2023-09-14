@@ -111,7 +111,8 @@ fn index_html() -> String {
     <tr>
       <td><label for="ssid">Retype:</label></td>
       <td><input type="password" id="passwd2" size="16"></td>
-      <td><button onclick="submit()">OK</button></td>
+      <td><button onclick="submit(true)">OK</button></td>
+      <td><button onclick="submit(false)">DEL</button></td>
     </tr>
     </table>
     <script>
@@ -135,20 +136,29 @@ fn index_html() -> String {
 	  };
   }
   
-  async function submit() {
+  async function submit(is_ok) {
 	  let api = location.protocol
 	      + '//' + location.hostname + '/play';
 	  let jsonmsg = {};
-	  let ssidlist = document.getElementById("ssid");
+	  
+    let ssidlist = document.getElementById("ssid");
 	  let passwd = document.getElementById("passwd");
 	  let passwd2 = document.getElementById("passwd2");
     if (passwd.value != passwd2.value) {
         window.alert("Different password.");
         return;
     }
-	  jsonmsg["ssid"] = ssidlist.value;
+
+    let mesg = "Set new password for SSID: \""+ssidlist.value+"\"\nPress OK to proceed.";
+    
+    if (is_ok) {
+	    jsonmsg["ssid"] = ssidlist.value;
+    } else {
+      jsonmsg["del_ssid"] = ssidlist.value;
+      mesg = "Remove SSID: \""+ssidlist.value.substr(2)+"\"\nPress OK to proceed."
+    }
 	  jsonmsg["password"] = passwd.value;
-    if (window.confirm("Change access point to SSID: \""+ssidlist.value+"\"\nPress OK to proceed.")) {
+    if (window.confirm(mesg)) {
 	    let jsonstr = JSON.stringify(jsonmsg);
 	    await fetch(api, {
 	        method: 'POST',
@@ -157,6 +167,7 @@ fn index_html() -> String {
 	        },
 	        body: jsonstr
 	    })
+      .then(res => { if (!is_ok) scan();})
       .catch((err) => { window.alert('Connection Error:'+uri+' '+err)});
     };
   }
