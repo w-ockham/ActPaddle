@@ -1,6 +1,7 @@
 use anyhow::{bail, Result};
 use esp_idf_svc::nvs::*;
-
+use log::*;
+use std::collections::HashMap;
 pub struct NVSkey {
     nvs: EspNvs<NvsDefault>,
     max_keys: u8,
@@ -8,53 +9,81 @@ pub struct NVSkey {
 
 impl NVSkey {
     pub fn new(namespace: &str) -> Result<NVSkey> {
-        let nvs_default_partition: EspNvsPartition<NvsDefault> = EspDefaultNvsPartition::take()?;
+        let nvs_default_partition = EspDefaultNvsPartition::take()?;
         let nvs = match EspNvs::new(nvs_default_partition, namespace, true) {
             Ok(nvs) => nvs,
-            Err(e) => panic!("Could't get namespace {:?}", e),
+            Err(e) => bail!("Could't get namespace {:?}", e),
         };
         Ok(NVSkey { nvs, max_keys: 4 })
     }
 
-    pub fn get_ssid_list(&mut self) -> Option<Vec<(String, String)>> {
-        let mut result = Vec::<(String, String)>::new();
+    pub fn clear(&mut self) -> Result<()> {
+        for n in 0..self.max_keys {
+            let ssidkey = format!("ssid{}", n);
+            let passwdkey = format!("passwd{}", n);
+            self.nvs.set_str(&ssidkey, "")?;
+            self.nvs.set_str(&passwdkey, "")?;
+        }
+        Ok(())
+    }
+
+    pub fn get_ssid_list(&mut self) -> Option<HashMap<String, String>> {
+        let mut result = HashMap::new();
         for n in 0..self.max_keys {
             let ssidkey = format!("ssid{}", n);
             let passwdkey = format!("passwd{}", n);
             if let Some(ssid) = self.get_value(&ssidkey) {
-                result.push((ssid, self.get_value(&passwdkey).unwrap()));
+                if !ssid.is_empty() {
+                    result.insert(ssid, self.get_value(&passwdkey).unwrap());
+                }
             }
         }
-        if result.len() > 0 {
+        if !result.is_empty() {
             Some(result)
         } else {
             None
         }
     }
 
-    pub fn set_ssid_passwd(&mut self, new_ssid: &str, new_passwd: &str) -> Result<()> {
+    pub fn del_ssid(&mut self, ssid: &str) -> Result<()> {
+        for n in 0..self.max_keys {
+            let ssidkey = format!("ssid{}", n);
+            let passwdkey = format!("passwd{}", n);
+            if let Some(nvs_ssid) = self.get_value(&ssidkey) {
+                if nvs_ssid == ssid  {
+                  info!("Clear SSID");
+                  self.nvs.set_str(&ssidkey, "")?;
+                  self.nvs.set_str(&passwdkey, "")?;
+                  return Ok(());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn set_ssid(&mut self, new_ssid: &str, new_passwd: &str) -> Result<()> {
         for n in 0..self.max_keys {
             let ssidkey = format!("ssid{}", n);
             let passwdkey = format!("passwd{}", n);
             if let Some(ssid) = self.get_value(&ssidkey) {
-                if ssid == new_ssid {
+                if ssid.is_empty() {
+                    self.nvs.set_str(&ssidkey, new_ssid)?;
+                    self.nvs.set_str(&passwdkey, new_passwd)?;
+                    info!("Set new SSID");
+                    return Ok(());
+                } else if ssid == new_ssid {
                     if !new_passwd.is_empty() {
-                        self.nvs.set_str(&passwdkey, new_passwd);
+                        self.nvs.set_str(&passwdkey, new_passwd)?;
                     }
                     return Ok(());
                 }
             } else {
-                self.nvs.set_str(&ssidkey, new_ssid);
-                self.nvs.set_str(&passwdkey, new_passwd);
+                self.nvs.set_str(&ssidkey, new_ssid)?;
+                self.nvs.set_str(&passwdkey, new_passwd)?;
                 return Ok(());
             }
         }
-        let n = self.max_keys - 1;
-        let ssidkey = format!("ssid{}", n);
-        let passwdkey = format!("passwd{}", n);
-        self.nvs.set_str(&ssidkey, new_ssid);
-        self.nvs.set_str(&passwdkey, new_passwd);
-        Ok(())
+        bail!("No NVS avalilable")
     }
 
     pub fn get_value(&self, key: &str) -> Option<String> {

@@ -14,8 +14,9 @@ debug = true    # Symbols are nice and they don't increase the size on Flash
 opt-level = "z"
 
 [features]
-default = ["native"]
+default = ["native","precision_delay"]
 native =["esp-idf-sys/native"]
+precision_delay = []
 
 [dependencies]
 esp-idf-sys = { version = "0.33", features = ["binstart"] }
