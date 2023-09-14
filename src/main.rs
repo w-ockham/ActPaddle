@@ -1,5 +1,4 @@
 use anyhow::Result;
-use esp_idf_hal::delay::Delay;
 use esp_idf_hal::gpio::PinDriver;
 use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_svc::eventloop::*;
@@ -8,7 +7,7 @@ use log::*;
 #[cfg(any(board = "m5atom", board = "m5stamp"))]
 use smart_leds::SmartLedsWrite;
 use std::io::stdin;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 
 #[cfg(any(board = "m5atom", board = "m5stamp"))]
@@ -105,12 +104,7 @@ fn main() -> Result<()> {
     })
     .take(1);
     #[cfg(any(board = "m5atom", board = "m5stamp"))]
-    let red_color = std::iter::repeat(RGB8 {
-        r: 20,
-        g: 0,
-        b: 0,
-    })
-    .take(1);
+    let red_color = std::iter::repeat(RGB8 { r: 20, g: 0, b: 0 }).take(1);
 
     #[cfg(board = "xiao-esp32c3")]
     let di = PinDriver::output(peripherals.pins.gpio3)?;
@@ -140,30 +134,65 @@ fn main() -> Result<()> {
         CONFIG.ap_ssid,
         CONFIG.ap_pass,
     )?;
-    
+
     #[cfg(any(board = "m5atom", board = "m5stamp"))]
     led.write(red_color.clone())?;
 
     wifi.wifi_start(None, saved_ap)?;
 
     let _server = spawn_server(tx_web, rx_web2);
+    let serial_active = Arc::new(Mutex::new(false));
 
-    thread::spawn(move || {
-        let reader = stdin();
-        loop {
-            let mut line = String::new();
-            if let Err(e) = reader.read_line(&mut line) {
-                info!("Error: {e}");
-            } else {
-                let mesg: Result<KeyerParam, serde_json::Error> = serde_json::from_str(&line);
-                if let Ok(mesg) = mesg {
-                    info!("STDIN= {:?}", mesg);
-                    let _ = tx_serial.send(mesg);
+    thread::spawn({
+        let serial_active = serial_active.clone();
+        move || {
+            let reader = stdin();
+            loop {
+                let mut line = String::new();
+                if let Err(e) = reader.read_line(&mut line) {
+                    info!("Error: {e}");
                 } else {
-                    info!("JSONError: {:?}", mesg);
+                    let mut sa = serial_active.lock().unwrap();
+                    *sa = true;
+                    let mesg: Result<KeyerParam, serde_json::Error> = serde_json::from_str(&line);
+                    if let Ok(mesg) = mesg {
+                        info!("STDIN= {:?}", mesg);
+                        let _ = tx_serial.send(mesg);
+                    } else {
+                        info!("JSONError: {:?}", mesg);
+                    }
                 }
             }
-            Delay::delay_ms(100);
+        }
+    });
+
+    wifi.add_handler(|state| {
+        match state {
+            wifi::WiFiState::Stopped => {
+                info!("WiFi Stopped.");
+            }
+            wifi::WiFiState::Started => {
+                #[cfg(any(board = "m5atom", board = "m5stamp"))]
+                let _ = led.write(white_color.clone());
+                #[cfg(board = "xiao-esp32c3")]
+                let _ = led.set_high();
+            }
+            wifi::WiFiState::Connected => {
+                #[cfg(any(board = "m5atom", board = "m5stamp"))]
+                let _ = led.write(empty_color.clone());
+                #[cfg(board = "xiao-esp32c3")]
+                let _ = led.set_low();
+            }
+            wifi::WiFiState::IfUp => {
+                info!("WiFi Interface UP.");
+            }
+        };
+        let sa = serial_active.lock().unwrap();
+        if *sa {
+            #[cfg(any(board = "m5atom", board = "m5stamp"))]
+            let _ = led.write(empty_color.clone());
+            #[cfg(board = "xiao-esp32c3")]
+            let _ = led.set_low();
         }
     });
 
@@ -198,20 +227,6 @@ fn main() -> Result<()> {
         if let Ok(msg) = rx_serial.try_recv() {
             morse.interp(&msg);
         }
-
         wifi.wifi_loop()?;
-
-        if wifi.is_up() {
-            #[cfg(any(board = "m5atom", board = "m5stamp"))]
-            led.write(empty_color.clone())?;
-            #[cfg(board = "xiao-esp32c3")]
-            led.set_high()?;
-        } else {
-            #[cfg(any(board = "m5atom", board = "m5stamp"))]
-            led.write(white_color.clone())?;
-            #[cfg(board = "xiao-esp32c3")]
-            led.set_low()?;
-        }
-        Delay::delay_ms(100);
     }
 }

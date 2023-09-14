@@ -50,7 +50,6 @@ pub fn spawn_server(
                 let body = String::from_utf8(buffer[0..size].to_vec()).unwrap();
                 let param = serde_json::from_str::<KeyerParam>(&body);
                 if let Ok(js) = param {
-                    info!("Posted value: {:?} = {:?}", body, js);
                     if js.ssidlist.is_some() {
                         tx.send(js)?;
                         if let Ok(ssids) = rx.recv_timeout(Duration::from_secs(10)) {
