@@ -1,5 +1,6 @@
 use embedded_hal::digital::v2::OutputPin;
-use esp_idf_hal::delay::FreeRtos;
+#[cfg(not(feature="precision_delay"))]
+use esp_idf_hal::delay::Delay;
 use log::*;
 
 use crate::param::KeyerParam;
@@ -112,7 +113,17 @@ where
     }
 
     fn wait(&self, ms: u32) {
-        FreeRtos::delay_ms(ms)
+      #[cfg(feature="precision_delay")]
+      {
+        use esp_idf_sys::{xTaskDelayUntil, xTaskGetTickCount, TickType_t,xPortGetTickRateHz};
+        let ticktowait: TickType_t = ms * unsafe {xPortGetTickRateHz()} / 1000;
+        let mut lastwake: TickType_t = unsafe { xTaskGetTickCount() };
+        unsafe {
+            xTaskDelayUntil(&mut lastwake, ticktowait);
+        }
+      }
+      #[cfg(not(feature="precision_delay"))]
+        Delay::delay_ms(ms);
     }
 
     fn assert(&mut self, mut pin: MorseCode, tick: u32) {
@@ -192,7 +203,7 @@ where
         }
     }
 
-    pub fn interp(&self, param: &KeyerParam) {
+    pub fn interp(&mut self, param: &KeyerParam) {
         if let Some(s) = param.wpm {
             self.set_wpm(s);
         }
@@ -212,11 +223,11 @@ where
                 self.normal();
             }
         }
-        if let Some(m) = param.to_paddle {
-            self.play(true, &m);
+        if param.to_paddle.is_some() {
+            self.play(true, param.to_paddle.as_ref().unwrap());
         }
-        if let Some(m) = param.to_straight {
-            self.play(false, &m);
+        if param.to_straight.is_some() {
+            self.play(false, param.to_straight.as_ref().unwrap());
         }
     }
 }
