@@ -99,7 +99,7 @@ fn index_html() -> String {
     <table>
     <tr>
       <td><label for="ssid">SSID:</label></td>
-      <td><select name="ssid" id="ssid">
+      <td><select name="ssid" id="ssid" onchange="clearpasswd()">
 	        <option disabled selected>Select SSID</option>
       </select></td>
     </tr>
@@ -115,20 +115,20 @@ fn index_html() -> String {
     </tr>
     </table>
     <script>
-    async function scan() {
-	let api = location.protocol + '//'
-	    + location.hostname + '/play';
-	let ssidlist = document.getElementById("ssid");
-  ssidlist.disabled = false;
-  ssidlist.innerHTML = "";
-  let jsonstr = JSON.stringify({'ssidlist':[]});
-	res = await fetch(api, {
-        method:'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: jsonstr
-  });
-	res = await res.json();
-	for (const s of res['ssidlist']) {
+  async function scan() {
+	  let api = location.protocol + '//'
+	      + location.hostname + '/play';
+	  let ssidlist = document.getElementById("ssid");
+    ssidlist.disabled = false;
+    ssidlist.innerHTML = "";
+    let jsonstr = JSON.stringify({'ssidlist':[]});
+	  res = await fetch(api, {
+          method:'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: jsonstr
+    });
+	  res = await res.json();
+	  for (const s of res['ssidlist']) {
 	    let opt = document.createElement("option");
 	    opt.innerHTML = s;
 	    ssidlist.appendChild(opt);
@@ -144,17 +144,17 @@ fn index_html() -> String {
 	  let passwd = document.getElementById("passwd");
 	  let passwd2 = document.getElementById("passwd2");
     if (passwd.value != passwd2.value) {
-        window.alert("Different password.");
+        window.alert("Two passwords are inconsistent.");
         return;
     }
 
-    let mesg = "Set new password for SSID: \""+ssidlist.value+"\"\nPress OK to proceed.";
+    let mesg = "Change AP to SSID \""+ssidlist.value.substr(2)+"\" with new password.\nPress OK to proceed.";
     
     if (is_ok) {
 	    jsonmsg["ssid"] = ssidlist.value;
     } else {
       jsonmsg["del_ssid"] = ssidlist.value;
-      mesg = "Remove SSID: \""+ssidlist.value.substr(2)+"\"\nPress OK to proceed."
+      mesg = "Remove SSID \""+ssidlist.value.substr(2)+"\".\nPress OK to proceed."
     }
 	  jsonmsg["password"] = passwd.value;
     if (window.confirm(mesg)) {
@@ -169,6 +169,13 @@ fn index_html() -> String {
       .then(res => { if (!is_ok) scan();})
       .catch((err) => { window.alert('Connection Error:'+uri+' '+err)});
     };
+  }
+
+  function clearpasswd() {
+    let passwd = document.getElementById("passwd");
+    let passwd2 = document.getElementById("passwd2");
+    passwd.value = "";
+    passwd2.value = "";
   }
   scan();
   </script>

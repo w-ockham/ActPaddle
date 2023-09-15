@@ -7,7 +7,7 @@ use log::*;
 #[cfg(any(board = "m5atom", board = "m5stamp"))]
 use smart_leds::SmartLedsWrite;
 use std::io::stdin;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::mpsc;
 use std::thread;
 
 #[cfg(any(board = "m5atom", board = "m5stamp"))]
@@ -25,7 +25,7 @@ use crate::morse::Morse;
 use crate::nvskey::NVSkey;
 use crate::param::KeyerParam;
 use crate::server::spawn_server;
-use crate::wifi::WiFiConnection;
+use crate::wifi::{WiFiConnection, WiFiState};
 
 #[toml_cfg::toml_config]
 pub struct Config {
@@ -97,14 +97,9 @@ fn main() -> Result<()> {
     #[cfg(any(board = "m5atom", board = "m5stamp"))]
     let empty_color = std::iter::repeat(RGB8::default()).take(1);
     #[cfg(any(board = "m5atom", board = "m5stamp"))]
-    let white_color = std::iter::repeat(RGB8 {
-        r: 10,
-        g: 10,
-        b: 10,
-    })
-    .take(1);
+    let white_color = std::iter::repeat(RGB8 { r: 5, g: 5, b: 5 }).take(1);
     #[cfg(any(board = "m5atom", board = "m5stamp"))]
-    let red_color = std::iter::repeat(RGB8 { r: 20, g: 0, b: 0 }).take(1);
+    let red_color = std::iter::repeat(RGB8 { r: 10, g: 0, b: 0 }).take(1);
 
     #[cfg(board = "xiao-esp32c3")]
     let di = PinDriver::output(peripherals.pins.gpio3)?;
@@ -117,9 +112,8 @@ fn main() -> Result<()> {
 
     let mut morse = Morse::new(di, dah);
 
-    let (tx_web, rx_web) = mpsc::channel::<KeyerParam>();
-    let (tx_web2, rx_web2) = mpsc::channel::<KeyerParam>();
-    let (tx_serial, rx_serial) = mpsc::channel::<KeyerParam>();
+    let (tx, rx) = mpsc::channel::<KeyerParam>();
+    let (tx2, rx2) = mpsc::channel::<KeyerParam>();
 
     if !CONFIG.stn_ssid.is_empty() {
         nvs.clear()?;
@@ -135,16 +129,50 @@ fn main() -> Result<()> {
         CONFIG.ap_pass,
     )?;
 
-    #[cfg(any(board = "m5atom", board = "m5stamp"))]
-    led.write(red_color.clone())?;
+    wifi.add_event_handler(|state| {
+        match state {
+            WiFiState::Idle => {
+                #[cfg(any(board = "m5atom", board = "m5stamp"))]
+                let _ = led.write(empty_color.clone());
+                #[cfg(board = "xiao-esp32c3")]
+                let _ = led.set_low();
+            }
+            WiFiState::Halt => {
+                #[cfg(any(board = "m5atom", board = "m5stamp"))]
+                let _ = led.write(red_color.clone());
+                #[cfg(board = "xiao-esp32c3")]
+                let _ = led.set_high();
+            }
+            WiFiState::Started => {
+                #[cfg(any(board = "m5atom", board = "m5stamp"))]
+                let _ = led.write(white_color.clone());
+                #[cfg(board = "xiao-esp32c3")]
+                let _ = led.set_high();
+            }
+            WiFiState::Connected => {
+                #[cfg(any(board = "m5atom", board = "m5stamp"))]
+                let _ = led.write(empty_color.clone());
+                #[cfg(board = "xiao-esp32c3")]
+                let _ = led.set_low();
+            }
+            WiFiState::IfUp => {
+                #[cfg(any(board = "m5atom", board = "m5stamp"))]
+                let _ = led.write(empty_color.clone());
+                #[cfg(board = "xiao-esp32c3")]
+                let _ = led.set_low();
+            }
+        };
+        None
+    });
+
+    wifi.add_periodical_handler(|_| None);
 
     wifi.wifi_start(None, saved_ap)?;
 
-    let _server = spawn_server(tx_web, rx_web2);
-    let serial_active = Arc::new(Mutex::new(false));
+    let tx_serial = tx.clone();
+    let _server = spawn_server(tx, rx2);
 
     thread::spawn({
-        let serial_active = serial_active.clone();
         move || {
             let reader = stdin();
             loop {
@@ -152,8 +180,6 @@ fn main() -> Result<()> {
                 if let Err(e) = reader.read_line(&mut line) {
                     info!("Error: {e}");
                 } else {
-                    let mut sa = serial_active.lock().unwrap();
-                    *sa = true;
                     let mesg: Result<KeyerParam, serde_json::Error> = serde_json::from_str(&line);
                     if let Ok(mesg) = mesg {
                         info!("STDIN= {:?}", mesg);
@@ -166,50 +192,28 @@ fn main() -> Result<()> {
         }
     });
 
-    wifi.add_handler(|state| {
-        match state {
-            wifi::WiFiState::Stopped => {
-                info!("WiFi Stopped.");
-            }
-            wifi::WiFiState::Started => {
-                #[cfg(any(board = "m5atom", board = "m5stamp"))]
-                let _ = led.write(white_color.clone());
-                #[cfg(board = "xiao-esp32c3")]
-                let _ = led.set_high();
-            }
-            wifi::WiFiState::Connected => {
-                #[cfg(any(board = "m5atom", board = "m5stamp"))]
-                let _ = led.write(empty_color.clone());
-                #[cfg(board = "xiao-esp32c3")]
-                let _ = led.set_low();
-            }
-            wifi::WiFiState::IfUp => {
-                info!("WiFi Interface UP.");
-            }
-        };
-        let sa = serial_active.lock().unwrap();
-        if *sa {
-            #[cfg(any(board = "m5atom", board = "m5stamp"))]
-            let _ = led.write(empty_color.clone());
-            #[cfg(board = "xiao-esp32c3")]
-            let _ = led.set_low();
-        }
-    });
-
     loop {
-        if let Ok(msg) = rx_web.try_recv() {
+        wifi.wifi_loop()?;
+        if let Ok(msg) = rx.recv() {
             if msg.ssid.is_some() || msg.del_ssid.is_some() || msg.ssidlist.is_some() {
                 if let Some(ssid) = msg.ssid {
                     if let Some(password) = msg.password {
-                        nvs.set_ssid(&ssid[2..], &password)?;
-                        info!("Set New SSID = {:?}", &ssid[2..]);
+                        if !password.is_empty() {
+                            if nvs.set_ssid(&ssid[2..], &password).is_ok() {
+                              info!("Set password for SSID = {:?}", &ssid[2..]);
+                            } else {
+                              info!("NVS full = {:?}", &ssid[2..]);
+                            }
+                        } else {
+                            info!("Change AP to {:?}", &ssid[2..]);
+                        }
                         let saved_ap = nvs.get_ssid_list();
                         wifi.wifi_start(Some(&ssid[2..]), saved_ap)?;
                     }
                 }
                 if let Some(ssid) = msg.del_ssid {
                     nvs.del_ssid(&ssid[2..])?;
-                    info!("Delete SSID = {:?}", &ssid[2..]);
+                    info!("Delete SSID  {:?}", &ssid[2..]);
                 }
                 if msg.ssidlist.is_some() {
                     let mut k = KeyerParam::default();
@@ -217,16 +221,11 @@ fn main() -> Result<()> {
                     if let Some(ssids) = wifi.scanned_ap_list(saved_ap) {
                         k.ssidlist = Some(ssids.to_vec());
                     }
-                    tx_web2.send(k)?;
+                    tx2.send(k)?;
                 }
             } else {
                 morse.interp(&msg);
             }
         }
-
-        if let Ok(msg) = rx_serial.try_recv() {
-            morse.interp(&msg);
-        }
-        wifi.wifi_loop()?;
     }
 }
