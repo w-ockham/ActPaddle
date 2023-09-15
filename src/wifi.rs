@@ -1,6 +1,5 @@
 use anyhow::Result;
 use embedded_svc::wifi::*;
-use esp_idf_hal::delay::Delay;
 use esp_idf_hal::peripheral;
 use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::mdns::EspMdns;
@@ -10,17 +9,19 @@ use std::collections::HashMap;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum WiFiState {
-    Stopped,
+    Idle,
+    Halt,
     Started,
     Connected,
     IfUp,
 }
 
-pub struct WiFiConnection<'a, F>
+pub struct WiFiConnection<'a, F1, F2>
 where
-    F: FnMut(WiFiState),
+    F1: FnMut(WiFiState) -> Option<WiFiState>,
+    F2: FnMut(WiFiState) -> Option<WiFiState>,
 {
-    esp_wifi: EspWifi<'static>,
+    esp_wifi: BlockingWifi<EspWifi<'static>>,
     mdns: EspMdns,
     host: &'a str,
     ap_ssid: &'a str,
@@ -28,12 +29,14 @@ where
     saved_ap_list: Option<HashMap<String, String>>,
     scanned_ap_list: Option<Vec<String>>,
     state: WiFiState,
-    handler: Option<F>,
+    event_handler: Option<F1>,
+    periodical_handler: Option<F2>,
 }
 
-impl<'a, F> WiFiConnection<'a, F>
+impl<'a, F1, F2> WiFiConnection<'a, F1, F2>
 where
-    F: FnMut(WiFiState),
+    F1: FnMut(WiFiState) -> Option<WiFiState>,
+    F2: FnMut(WiFiState) -> Option<WiFiState>,
 {
     pub fn new(
         modem: impl peripheral::Peripheral<P = esp_idf_hal::modem::Modem> + 'static,
@@ -43,7 +46,10 @@ where
         ap_pass: &'a str,
     ) -> Result<Self> {
         let nvs = None;
-        let esp_wifi = EspWifi::<'static>::new(modem, sysloop.clone(), nvs)?;
+        let esp_wifi = BlockingWifi::wrap(
+            EspWifi::<'static>::new(modem, sysloop.clone(), nvs)?,
+            sysloop,
+        )?;
         let mdns = EspMdns::take()?;
         Ok(Self {
             esp_wifi,
@@ -53,8 +59,9 @@ where
             ap_pass,
             saved_ap_list: None,
             scanned_ap_list: None,
-            state: WiFiState::Stopped,
-            handler: None,
+            state: WiFiState::Idle,
+            event_handler: None,
+            periodical_handler: None,
         })
     }
 
@@ -68,12 +75,14 @@ where
         let _ = self.esp_wifi.disconnect();
         let _ = self.esp_wifi.stop();
 
+        self.state = WiFiState::Idle;
+        self.wifi_loop()?;
+
         self.esp_wifi
             .set_configuration(&Configuration::Client(ClientConfiguration::default()))?;
         self.esp_wifi.start()?;
 
         let ap_info = self.ap_scan();
-
         let candidate = ap_info.iter().find(|&a| {
             if let Some(ssid) = default_ssid {
                 a.ssid == ssid
@@ -114,14 +123,40 @@ where
             }
         };
 
-        let conf = Configuration::Mixed(stn_conf, ap_conf);
-        info!("Config = {:?}", conf);
-        self.esp_wifi.set_configuration(&conf).unwrap();
-        self.esp_wifi.start().unwrap();
+        let ap_config = Configuration::AccessPoint(ap_conf.clone());
+        let mixed_config = Configuration::Mixed(stn_conf.clone(), ap_conf);
+
+        if stn_conf.ssid.is_empty() || stn_conf.password.is_empty() {
+            self.esp_wifi.set_configuration(&ap_config).unwrap();
+        } else {
+            self.esp_wifi.set_configuration(&mixed_config).unwrap();
+        }
+
+        self.esp_wifi.start()?;
+        self.wifi_loop()?;
+
+        let mut rc = 0;
+        while self.esp_wifi.connect().is_err() {
+            rc += 1;
+            info!("Retry connecting {}", rc);
+            if rc  > 2 {
+                info!("Restart AP as {:?}", ap_config);
+                self.esp_wifi.stop()?;
+                self.esp_wifi.set_configuration(&ap_config)?;
+                self.esp_wifi.start()?;
+                break;
+            }
+        }
 
         self.mdns.set_hostname(self.host)?;
-
         info!("Staring WiFi.");
+        self.wifi_loop()?;
+        Ok(())
+    }
+
+    pub fn wifi_stop(&mut self) -> Result<()> {
+        self.esp_wifi.disconnect()?;
+        self.esp_wifi.stop()?;
         Ok(())
     }
 
@@ -164,40 +199,74 @@ where
         }
     }
 
-    pub fn add_handler(&mut self, f: F) {
-        self.handler = Some(f);
+    pub fn add_event_handler(&mut self, f: F1) {
+        self.event_handler = Some(f);
     }
 
-    pub fn wifi_loop(&mut self) -> Result<()> {
-        let prev = self.state;
-        let mut delay = 200;
+    pub fn add_periodical_handler(&mut self, f: F2) {
+        self.periodical_handler = Some(f);
+    }
 
-        if self.esp_wifi.is_started().is_ok() {
-            self.state = WiFiState::Started;
-            if let Ok(connected) = self.esp_wifi.is_connected() {
-                if connected {
-                    self.state = WiFiState::Connected;
-                    delay = 500;
-                    if self.esp_wifi.is_up().unwrap() {
-                        self.state = WiFiState::IfUp;
+    pub fn wifi_loop(&mut self) -> Result<WiFiState> {
+        let prev = self.state;
+
+        if let Ok(started) = self.esp_wifi.is_started() {
+            match started {
+                true => {
+                    self.state = WiFiState::Started;
+                    if let Ok(connected) = self.esp_wifi.is_connected() {
+                        match connected {
+                            true => {
+                                self.state = WiFiState::Connected;
+                                if let Ok(isup) = self.esp_wifi.is_up() {
+                                    match isup {
+                                        true => self.state = WiFiState::IfUp,
+                                        false => {}
+                                    }
+                                }
+                            }
+                            false => {}
+                        }
                     }
                 }
+                false => self.state = WiFiState::Halt,
             }
         }
 
+        #[allow(clippy::single_match, clippy::collapsible_match)]
         if prev != self.state {
-            if self.handler.is_some() {
-                self.handler.as_mut().unwrap()(self.state);
-                if self.state == WiFiState::IfUp {
-                    let ap_info = self.esp_wifi.ap_netif().get_ip_info();
-                    let sta_info = self.esp_wifi.sta_netif().get_ip_info();
+            match self.state {
+                WiFiState::Started => {}
+                WiFiState::IfUp => {
+                    let ap_info = self.esp_wifi.wifi().ap_netif().get_ip_info();
+                    let sta_info = self.esp_wifi.wifi().sta_netif().get_ip_info();
                     info!("AP Info: {:?}\nSTN Info: {:?}", ap_info, sta_info);
                 }
+                _ => {}
             }
-        } else if self.state == WiFiState::Started {
-            let _ = self.esp_wifi.connect();
+            if self.event_handler.is_some() {
+                if let Some(next_state) = self.event_handler.as_mut().unwrap()(self.state) {
+                    match next_state {
+                        WiFiState::Halt => (),
+                        _ => (),
+                    };
+                }
+            }
+        } else {
+            match self.state {
+                WiFiState::Started => {}
+                _ => (),
+            }
+            if self.periodical_handler.is_some() {
+                if let Some(next_state) = self.periodical_handler.as_mut().unwrap()(self.state) {
+                    match next_state {
+                        WiFiState::Halt => self.wifi_stop()?,
+                        _ => (),
+                    };
+                }
+            }
         }
-        Delay::delay_ms(delay);
-        Ok(())
+        info!("State={:?}", self.state);
+        Ok(self.state)
     }
 }
