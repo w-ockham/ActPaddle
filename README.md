@@ -61,18 +61,24 @@ Pocket KeyerのようにCWメッセージで書き込み先を指定するキー
 # ハードウェア編
 ## 必要な部品
 
-1. ESP32(Xtensa又はRISC-V)　[M5 AtomLite](https://akizukidenshi.com/catalog/g/gM-17209/),[M5StampC3U](https://www.switch-science.com/products/7894),[Seeed Studio XIAO ESP32C3](https://akizukidenshi.com/catalog/g/gM-17454/)
+1. ESP32(Xtensa又はRISC-V) x1
+[M5 AtomLite](https://akizukidenshi.com/catalog/g/gM-17209/) 
+[M5StampC3U](https://www.switch-science.com/products/7894)
+[Seeed Studio XIAO ESP32C3](https://akizukidenshi.com/catalog/g/gM-17454/)など
 2. フォトカプラ[TL293](https://akizukidenshi.com/catalog/g/gI-16783/)など x2
-4. 抵抗 100Ω (フォトカプラ・LEDの電流制限用) x2
+4. 抵抗 100Ω 1/6W (フォトカプラ・LED電流制限用) x3
 5. [ジャック(パドル接続用)](https://akizukidenshi.com/catalog/g/gK-05363/) x1
-6. ブレッドボードなど x 2
+6. [ATOMICプロトキット](https://www.switch-science.com/products/6345)(M5 ATOMを使う場合)
+6. [ピンヘッダ](https://akizukidenshi.com/catalog/g/gC-00167/) x1  ユニバーサル基板 x1 (M5Stamp/XIAO ESP32C3を使う場合)
+7. LED (XIAO ESP32C3を使う場合)
 
 ## 回路構成
-3.5mmステレオジャックをフォトカプラでキーイングします。長点側を3.5mmプラグの先端側(L),短点側を真ん中のリング(R)、グラウンドを根元側(G)に接続します。GPIOから電流制限用の100オームを介してフォトカプラのLEDに接続します。GPIO出力は使うボードによって異なります。
-
-回路図(TBD)
+3.5mmステレオジャックをフォトカプラでキーイングします。長点側を3.5mmプラグの先端側(L),短点側を真ん中のリング(R)、グラウンドを根元側(G)に接続します。GPIOから電流制限用の100オームを介してフォトカプラのLEDに接続します。GPIO出力は使うボードによって異なりますので適宜読み替えてください。
 
 また動作表示用のLEDはM5ATOM/Stampは内蔵のシリアルLEDを使います。XIAO ESP32C3はGPIO4を割り当てていますので電流制限用抵抗を付けて適宜LEDを接続してください。
+
+<img src="./images/schematic.jpg"  width="80%">
+
 ### M5ATOM
 |GPIO|入出力|機能|
 |:---|:-----|:-----|
@@ -88,12 +94,48 @@ Pocket KeyerのようにCWメッセージで書き込み先を指定するキー
 ### XIAO ESP32C3
 |GPIO|入出力|機能|
 |:---|:-----|:-----|
-| 2 | 出力 | 長点|
-| 3 | 出力 | 短点|
-| 4 | 出力 | LED|
+| 2(D0)| 出力 | 長点|
+| 3(D1) | 出力 | 短点|
+| 4(D2) | 出力 | LED|
 
-## 開発環境について
-WSL2でRustを[インストール](https://www.rust-lang.org/tools/install)後、[espup](https://github.com/esp-rs/espup)を使ってXtensa用のツールチェインを入れています。ターゲットは`.cargo/config.toml`で指定します。またrustflagsで`board`というfeatureを使ってボード毎のピンアサインを変更しています。ターゲット変更時にはこちらも修正漏れがないようにしてください。
+***
+# ソフトウェア編
+## コンパイル済みファームウェアをインストールする場合
+### M5ATOM/M5Stampの場合
+M5Statck社の[サイト](https://docs.m5stack.com/en/download)からM5Burnerをダウンロードしてインストールしてください(UIFLOW FIRMWARE BURNING TOOLにあります)。
+
+<img src="./images/m5burner.jpg"  width="60%" height="30%">
+
+左側の製品の選択でATOM又はSTMAPを選択後、上部の検索窓に"ActPaddle"と入力するとアップロード済みファイルが検索されます。”Download"を押してダウンロードした後、ハードウェア編で作ったハードをUSB接続します。接続後、"BURN"を押すと書込みが始まります。無事書込みが終わるとアクセスポイントモードで立ち上がります（赤いランプが点灯）。[事前の設定](#事前の設定)を参照して設定をしてください。
+
+### XIAO ESP32C3の場合
+githubの[リリースページ](https://github.com/w-ockham/ActPaddle/releases)にソースファイル一式と一緒にコンパイル済みのバイナリファイルが置いてあります。
+Pythonをインストール後、pipでesptoolをインストールしてください。
+```
+pip install esptool
+```
+次にダウンロードしたバイナリを`esptool.py`コマンドを使って書き込みます。シリアルポートはデバイスマネージャで表示されるシリアルポート名(COM1など)に置き換えてください。
+```
+esptool --port シリアルポート write_flash 0x00000 esp32c3-actpaddle.bin
+```
+書込み後は[事前の設定](#事前の設定)を参照し設定をしてください。
+
+## ソースファイルからコンパイルする場合
+### 開発環境の構築
+Ubuntu又はWindowsに[WSL2をインストール](https://learn.microsoft.com/ja-jp/windows/wsl/install)した環境を準備してください。
+
+次にRustを[インストール](https://www.rust-lang.org/tools/install)します。次に以下の手順でgccや開発環境をインストールします。
+```
+sudo apt-get install -y gcc build-essential curl pkg-config
+```
+次にRustでESP-IDFの開発環境をインストールするクレート[espup](https://github.com/esp-rs/espup)をインストールします。cargoコマンドでコンパイルが完了すると`espup`コマンドがインストールされますのでinstallコマンドでESP32用のツールチェインをインストールしてください。
+```
+cargo install espup
+espup install
+```
+これでESP32系のXtensa.ESP32C3のRISC-Vのクロスコンパイル環境がインストールされます。
+
+ActPaddleをコンパイルする際はターゲットを`.cargo/config.toml`で指定します。またrustflagsで`board`というfeatureを使ってボード毎のピンアサインを変更しています。ターゲット変更時にはこちらも修正漏れがないようにしてください。
 
 またESP-IDFは4系の最新版v4.4.5(2023/9/16現在)を使っています。初期設定をボード毎に変更する必要があるため、環境変数’ESP_IDF_SDKCONFIG_DEFAULTS'でXtensa用(`sdkconfig.defaults.esp32`), RISC-V用(`sdkconfig.defaults.esp`)を選択してください。
 
@@ -123,3 +165,71 @@ build-std = ["std", "panic_abort"]
 ESP_IDF_VERSION = "v4.4.5"
 ESP_IDF_SDKCONFIG_DEFAULTS = "sdkconfig.defaults.esp32" 
 #ESP_IDF_SDKCONFIG_DEFAULTS = "sdkconfig.defaults.esp" 
+````
+### サーバー証明書・サーバ秘密鍵の生成
+WiFi版のActPaddleはChrome上のJavascriptからhttpsを使ってアクセスされます。そのためhttpsサーバのサーバー証明書・サーバー秘密鍵をコンパイル時にコード中に埋め込んでいます。ここではサーバー証明書・サーバー秘密鍵の作り方を説明します。
+#### CA秘密鍵・CA証明書の作成
+サーバー証明書を発行するためのルート認証局(ルートCA)を作ります。まずはCA秘密鍵を生成します。
+```
+openssl genrsa -out ca.key 2048
+```
+次にCSR(Certificate Signing Request)とCAの公開鍵を生成します。
+```
+openssl req -new -key ca.key -out ca.csr -subj "/C=JP/CN=ActPaddle CA"
+```
+次に証明属性定義ファイル`ca.ext`に以下を記載します。
+```
+[ v3_ca ]
+basicConstraints = critical, CA:true
+keyUsage = keyCertSign, cRLSign
+extendedKeyUsage = serverAuth, clientAuth
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid,issuer
+```
+最後にCA証明書を生成します。
+```
+openssl x509 -req \
+    -signkey ca.key \
+    -extfile ca.ext \
+    -extensions "v3_ca" \
+    -in ca.csr \
+    -out ca.crt \
+    -days 3650 \
+    -sha256
+```
+
+#### サーバ証明書・サーバ秘密鍵の生成
+まずサーバの秘密鍵を生成します。生成した秘密鍵`prvtkey.pem`はコンパイル時に参照するため`./cert/private/`の下においてください。
+```
+openssl genrsa -out prvtkey.pem 2048
+```
+次にサーバーのCSRを作ります。
+```
+openssl req -new -key prvtkey.pem -out server.csr -subj "/CN=actpaddle.local"
+```
+認証局と同様にサーバー証明書属性定義ファイル`server.ext`に以下を記載します。
+```
+[ v3_server ]
+basicConstraints = critical, CA:false
+keyUsage = digitalSignature, keyEncipherment
+extendedKeyUsage = serverAuth, clientAuth
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid,issuer
+subjectAltName = DNS:actpaddle.local
+```
+最後にCA認証鍵でサーバー証明書`cacert.pem`を生成します。有効期限(-days)は任意に設定できますが365日以上の値を設定するとiOSではエラーとなるようです。こちら`cacert.pem`も`./cert/private/`の下においてください。
+```
+openssl x509 -req -CAkey ca.key -CA ca.crt -CAcreateserial -extfile server.ext -extensions "v3_server" -in server.csr -out cacert.pem -days 365 -sha256
+```
+### コンパイルと実行
+WSL環境の場合はUSBデバイスをWSL環境からアクセスできるようにするため、[こちらの記事](https://jl1nie.wordpress.com/2023/04/08/rust%e3%81%a7l%e3%83%81%e3%82%ab%e3%81%97%e3%81%a6%e3%81%bf%e3%81%9f/)を参考に事前設定をしてください。
+
+シリアル環境が整ったら
+```
+carogo run --release
+```
+でビルド・コンパイル・フラッシュへの書込みとシリアル回線のモニターを開始します。最初のコンパイルではESP-IDFのビルドから行いますのでかなり時間がかかります。
+
+フラッシュの書込み後、以下のようなメッセージが表示されればOKです。
+
+<img src="./images/serial-console.jpg">
