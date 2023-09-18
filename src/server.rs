@@ -14,8 +14,8 @@ pub fn spawn_server(
     tx: Sender<KeyerParam>,
     rx: Receiver<KeyerParam>,
 ) -> Result<Box<EspHttpServer>> {
-    let server_cert_bytes: Vec<u8> = include_bytes!("../cert/cacert.pem").to_vec();
-    let private_key_bytes: Vec<u8> = include_bytes!("../cert/prvtkey.pem").to_vec();
+    let server_cert_bytes: Vec<u8> = include_bytes!("../cert/private/cacert.pem").to_vec();
+    let private_key_bytes: Vec<u8> = include_bytes!("../cert/private/prvtkey.pem").to_vec();
 
     let server_cert: X509 = convert_certificate(server_cert_bytes);
     let private_key: X509 = convert_certificate(private_key_bytes);
