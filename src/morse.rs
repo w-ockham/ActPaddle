@@ -1,5 +1,5 @@
 use embedded_hal::digital::v2::OutputPin;
-#[cfg(not(feature="precision_delay"))]
+#[cfg(not(feature = "precision_delay"))]
 use esp_idf_hal::delay::Delay;
 use log::*;
 
@@ -113,16 +113,16 @@ where
     }
 
     fn wait(&self, ms: u32) {
-      #[cfg(feature="precision_delay")]
-      {
-        use esp_idf_sys::{xTaskDelayUntil, xTaskGetTickCount, TickType_t,xPortGetTickRateHz};
-        let ticktowait: TickType_t = ms * unsafe {xPortGetTickRateHz()} / 1000;
-        let mut lastwake: TickType_t = unsafe { xTaskGetTickCount() };
-        unsafe {
-            xTaskDelayUntil(&mut lastwake, ticktowait);
+        #[cfg(feature = "precision_delay")]
+        {
+            use esp_idf_sys::{xPortGetTickRateHz, xTaskDelayUntil, xTaskGetTickCount, TickType_t};
+            let ticktowait: TickType_t = ms * unsafe { xPortGetTickRateHz() } / 1000;
+            let mut lastwake: TickType_t = unsafe { xTaskGetTickCount() };
+            unsafe {
+                xTaskDelayUntil(&mut lastwake, ticktowait);
+            }
         }
-      }
-      #[cfg(not(feature="precision_delay"))]
+        #[cfg(not(feature = "precision_delay"))]
         Delay::delay_ms(ms);
     }
 
@@ -227,6 +227,7 @@ where
             self.play(true, param.to_paddle.as_ref().unwrap());
         }
         if param.to_straight.is_some() {
+            self.normal();
             self.play(false, param.to_straight.as_ref().unwrap());
         }
     }
