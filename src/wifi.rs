@@ -124,12 +124,12 @@ where
         };
 
         let ap_config = Configuration::AccessPoint(ap_conf.clone());
-        let mixed_config = Configuration::Mixed(stn_conf.clone(), ap_conf);
+        let client_config = Configuration::Client(stn_conf.clone());
 
         if stn_conf.ssid.is_empty() || stn_conf.password.is_empty() {
             self.esp_wifi.set_configuration(&ap_config).unwrap();
         } else {
-            self.esp_wifi.set_configuration(&mixed_config).unwrap();
+            self.esp_wifi.set_configuration(&client_config).unwrap();
         }
 
         self.esp_wifi.start()?;
