@@ -23,4 +23,6 @@ pub struct KeyerParam {
     pub password: Option<String>,
     #[serde(default)]
     pub ssidlist: Option<Vec<String>>,
+    #[serde(default)]
+    pub init : Option<bool>,
 }

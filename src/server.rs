@@ -110,11 +110,20 @@ fn index_html() -> String {
     <tr>
       <td><label for="ssid">Retype:</label></td>
       <td><input type="password" id="passwd2" size="16"></td>
-      <td><button onclick="submit(true)">OK</button></td>
-      <td><button onclick="submit(false)">DEL</button></td>
+      <td><button onclick="submit(command.set_passwd)">OK</button></td>
+      <td><button onclick="submit(command.delete_passwd)">DEL</button></td>
+      <td>&nbsp&nbsp</td>
+      <td><button onclick="submit(command.clear_all)">Clear All</button></td>
     </tr>
     </table>
-    <script>
+  <script>
+  
+  const command = {
+    set_passwd: 0,
+    delete_passwd: 1,
+    clear_all :2,
+  }
+
   async function scan() {
 	  let api = location.protocol + '//'
 	      + location.hostname + '/play';
@@ -135,28 +144,35 @@ fn index_html() -> String {
 	  };
   }
   
-  async function submit(is_ok) {
+  async function submit(cmd) {
 	  let api = location.protocol
 	      + '//' + location.hostname + '/play';
 	  let jsonmsg = {};
-	  
-    let ssidlist = document.getElementById("ssid");
-	  let passwd = document.getElementById("passwd");
-	  let passwd2 = document.getElementById("passwd2");
-    if (passwd.value != passwd2.value) {
-        window.alert("Two passwords are inconsistent.");
+    let mesg = "";
+    if (cmd == command.set_passwd || cmd == command.delete_passwd) {
+      let ssidlist = document.getElementById("ssid");
+      let passwd = document.getElementById("passwd");
+      let passwd2 = document.getElementById("passwd2");
+      
+      if (cmd == command.set_passwd && passwd.value != passwd2.value) {
+        window.alert("Two passwords are different.");
         return;
+      }
+
+      mesg = "Change AP to SSID \""+ssidlist.value.substr(2)+"\" with new password.\nPress OK to proceed.";
+    
+      if (cmd == command.set_passwd) {
+        jsonmsg["ssid"] = ssidlist.value;
+      } else {
+        mesg = "Delete password for SSID \""+ssidlist.value.substr(2)+"\".\nPress OK to proceed."
+        jsonmsg["del_ssid"] = ssidlist.value;
+      }
+      jsonmsg["password"] = passwd.value;
+    } else if (cmd == command.clear_all) {
+      mesg = "Clear All password.\nPress OK to proceed.";
+      jsonmsg["init"] = true;
     }
 
-    let mesg = "Change AP to SSID \""+ssidlist.value.substr(2)+"\" with new password.\nPress OK to proceed.";
-    
-    if (is_ok) {
-	    jsonmsg["ssid"] = ssidlist.value;
-    } else {
-      jsonmsg["del_ssid"] = ssidlist.value;
-      mesg = "Remove SSID \""+ssidlist.value.substr(2)+"\".\nPress OK to proceed."
-    }
-	  jsonmsg["password"] = passwd.value;
     if (window.confirm(mesg)) {
 	    let jsonstr = JSON.stringify(jsonmsg);
 	    await fetch(api, {
@@ -166,7 +182,7 @@ fn index_html() -> String {
 	        },
 	        body: jsonstr
 	    })
-      .then(res => { if (!is_ok) scan();})
+      .then(res => { if (cmd != command.set_passwd) scan();})
       .catch((err) => { window.alert('Connection Error:'+uri+' '+err)});
     };
   }
@@ -177,6 +193,7 @@ fn index_html() -> String {
     passwd.value = "";
     passwd2.value = "";
   }
+  
   scan();
   </script>
 </body>

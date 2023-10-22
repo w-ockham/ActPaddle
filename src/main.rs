@@ -97,9 +97,13 @@ fn main() -> Result<()> {
     #[cfg(any(board = "m5atom", board = "m5stamp"))]
     let empty_color = std::iter::repeat(RGB8::default()).take(1);
     #[cfg(any(board = "m5atom", board = "m5stamp"))]
-    let white_color = std::iter::repeat(RGB8 { r: 5, g: 5, b: 5 }).take(1);
+    let white_color = std::iter::repeat(RGB8 { r: 3, g: 3, b: 3 }).take(1);
     #[cfg(any(board = "m5atom", board = "m5stamp"))]
-    let red_color = std::iter::repeat(RGB8 { r: 10, g: 0, b: 0 }).take(1);
+    let red_color = std::iter::repeat(RGB8 { r: 5, g: 0, b: 0 }).take(1);
+    #[cfg(any(board = "m5atom", board = "m5stamp"))]
+    let green_color = std::iter::repeat(RGB8 { r: 0, g: 5, b: 0 }).take(1);
+    #[cfg(any(board = "m5atom", board = "m5stamp"))]
+    let yellow_color = std::iter::repeat(RGB8 { r: 3, g: 3, b: 0 }).take(1);
 
     #[cfg(board = "xiao-esp32c3")]
     let di = PinDriver::output(peripherals.pins.gpio3)?;
@@ -151,16 +155,22 @@ fn main() -> Result<()> {
             }
             WiFiState::Connected => {
                 #[cfg(any(board = "m5atom", board = "m5stamp"))]
-                let _ = led.write(empty_color.clone());
+                let _ = led.write(green_color.clone());
                 #[cfg(board = "xiao-esp32c3")]
                 let _ = led.set_low();
             }
-            WiFiState::IfUp => {
+            WiFiState::IfUpAp => {
                 #[cfg(any(board = "m5atom", board = "m5stamp"))]
-                let _ = led.write(empty_color.clone());
+                let _ = led.write(yellow_color.clone());
                 #[cfg(board = "xiao-esp32c3")]
                 let _ = led.set_low();
             }
+            WiFiState::IfUpClient => {
+              #[cfg(any(board = "m5atom", board = "m5stamp"))]
+              let _ = led.write(green_color.clone());
+              #[cfg(board = "xiao-esp32c3")]
+              let _ = led.set_low();
+          }
         };
         None
     });
@@ -195,14 +205,14 @@ fn main() -> Result<()> {
     loop {
         wifi.wifi_loop()?;
         if let Ok(msg) = rx.recv() {
-            if msg.ssid.is_some() || msg.del_ssid.is_some() || msg.ssidlist.is_some() {
+            if msg.ssid.is_some() || msg.del_ssid.is_some() || msg.ssidlist.is_some() || msg.init.is_some(){
                 if let Some(ssid) = msg.ssid {
                     if let Some(password) = msg.password {
                         if !password.is_empty() {
                             if nvs.set_ssid(&ssid[2..], &password).is_ok() {
-                              info!("Set password for SSID = {:?}", &ssid[2..]);
+                                info!("Set password for SSID = {:?}", &ssid[2..]);
                             } else {
-                              info!("NVS full = {:?}", &ssid[2..]);
+                                info!("NVS full = {:?}", &ssid[2..]);
                             }
                         } else {
                             info!("Change AP to {:?}", &ssid[2..]);
@@ -222,6 +232,10 @@ fn main() -> Result<()> {
                         k.ssidlist = Some(ssids.to_vec());
                     }
                     tx2.send(k)?;
+                }
+                if msg.init.is_some() {
+                  nvs.clear()?;
+                  info!("Clear all SSID");
                 }
             } else {
                 morse.interp(&msg);

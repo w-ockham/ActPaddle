@@ -13,7 +13,8 @@ pub enum WiFiState {
     Halt,
     Started,
     Connected,
-    IfUp,
+    IfUpClient,
+    IfUpAp,
 }
 
 pub struct WiFiConnection<'a, F1, F2>
@@ -29,6 +30,7 @@ where
     saved_ap_list: Option<HashMap<String, String>>,
     scanned_ap_list: Option<Vec<String>>,
     state: WiFiState,
+    is_ap: bool,
     event_handler: Option<F1>,
     periodical_handler: Option<F2>,
 }
@@ -60,6 +62,7 @@ where
             saved_ap_list: None,
             scanned_ap_list: None,
             state: WiFiState::Idle,
+            is_ap: false,
             event_handler: None,
             periodical_handler: None,
         })
@@ -128,8 +131,10 @@ where
 
         if stn_conf.ssid.is_empty() || stn_conf.password.is_empty() {
             self.esp_wifi.set_configuration(&ap_config).unwrap();
+            self.is_ap = true;
         } else {
             self.esp_wifi.set_configuration(&client_config).unwrap();
+            self.is_ap = false;
         }
 
         self.esp_wifi.start()?;
@@ -139,7 +144,7 @@ where
         while self.esp_wifi.connect().is_err() {
             rc += 1;
             info!("Retry connecting {}", rc);
-            if rc  > 2 {
+            if rc > 2 {
                 info!("Restart AP as {:?}", ap_config);
                 self.esp_wifi.stop()?;
                 self.esp_wifi.set_configuration(&ap_config)?;
@@ -220,7 +225,13 @@ where
                                 self.state = WiFiState::Connected;
                                 if let Ok(isup) = self.esp_wifi.is_up() {
                                     match isup {
-                                        true => self.state = WiFiState::IfUp,
+                                        true => {
+                                            self.state = if self.is_ap {
+                                                WiFiState::IfUpAp
+                                            } else {
+                                                WiFiState::IfUpClient
+                                            }
+                                        }
                                         false => {}
                                     }
                                 }
@@ -237,10 +248,14 @@ where
         if prev != self.state {
             match self.state {
                 WiFiState::Started => {}
-                WiFiState::IfUp => {
+                WiFiState::IfUpAp => {
                     let ap_info = self.esp_wifi.wifi().ap_netif().get_ip_info();
+
+                    info!("AP Info: {:?}", ap_info);
+                }
+                WiFiState::IfUpClient => {
                     let sta_info = self.esp_wifi.wifi().sta_netif().get_ip_info();
-                    info!("AP Info: {:?}\nSTN Info: {:?}", ap_info, sta_info);
+                    info!("STN Info: {:?}", sta_info);
                 }
                 _ => {}
             }
