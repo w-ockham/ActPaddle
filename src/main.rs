@@ -97,9 +97,13 @@ fn main() -> Result<()> {
     #[cfg(any(board = "m5atom", board = "m5stamp"))]
     let empty_color = std::iter::repeat(RGB8::default()).take(1);
     #[cfg(any(board = "m5atom", board = "m5stamp"))]
-    let white_color = std::iter::repeat(RGB8 { r: 5, g: 5, b: 5 }).take(1);
+    let white_color = std::iter::repeat(RGB8 { r: 3, g: 3, b: 3 }).take(1);
     #[cfg(any(board = "m5atom", board = "m5stamp"))]
-    let red_color = std::iter::repeat(RGB8 { r: 10, g: 0, b: 0 }).take(1);
+    let red_color = std::iter::repeat(RGB8 { r: 5, g: 0, b: 0 }).take(1);
+    #[cfg(any(board = "m5atom", board = "m5stamp"))]
+    let green_color = std::iter::repeat(RGB8 { r: 0, g: 5, b: 0 }).take(1);
+    #[cfg(any(board = "m5atom", board = "m5stamp"))]
+    let yellow_color = std::iter::repeat(RGB8 { r: 3, g: 3, b: 0 }).take(1);
 
     #[cfg(board = "xiao-esp32c3")]
     let di = PinDriver::output(peripherals.pins.gpio3)?;
@@ -151,16 +155,22 @@ fn main() -> Result<()> {
             }
             WiFiState::Connected => {
                 #[cfg(any(board = "m5atom", board = "m5stamp"))]
-                let _ = led.write(empty_color.clone());
+                let _ = led.write(green_color.clone());
                 #[cfg(board = "xiao-esp32c3")]
                 let _ = led.set_low();
             }
-            WiFiState::IfUp => {
+            WiFiState::IfUpAp => {
                 #[cfg(any(board = "m5atom", board = "m5stamp"))]
-                let _ = led.write(empty_color.clone());
+                let _ = led.write(yellow_color.clone());
                 #[cfg(board = "xiao-esp32c3")]
                 let _ = led.set_low();
             }
+            WiFiState::IfUpClient => {
+              #[cfg(any(board = "m5atom", board = "m5stamp"))]
+              let _ = led.write(green_color.clone());
+              #[cfg(board = "xiao-esp32c3")]
+              let _ = led.set_low();
+          }
         };
         None
     });
