@@ -195,14 +195,14 @@ fn main() -> Result<()> {
     loop {
         wifi.wifi_loop()?;
         if let Ok(msg) = rx.recv() {
-            if msg.ssid.is_some() || msg.del_ssid.is_some() || msg.ssidlist.is_some() {
+            if msg.ssid.is_some() || msg.del_ssid.is_some() || msg.ssidlist.is_some() || msg.init.is_some(){
                 if let Some(ssid) = msg.ssid {
                     if let Some(password) = msg.password {
                         if !password.is_empty() {
                             if nvs.set_ssid(&ssid[2..], &password).is_ok() {
-                              info!("Set password for SSID = {:?}", &ssid[2..]);
+                                info!("Set password for SSID = {:?}", &ssid[2..]);
                             } else {
-                              info!("NVS full = {:?}", &ssid[2..]);
+                                info!("NVS full = {:?}", &ssid[2..]);
                             }
                         } else {
                             info!("Change AP to {:?}", &ssid[2..]);
@@ -222,6 +222,10 @@ fn main() -> Result<()> {
                         k.ssidlist = Some(ssids.to_vec());
                     }
                     tx2.send(k)?;
+                }
+                if msg.init.is_some() {
+                  nvs.clear()?;
+                  info!("Clear all SSID");
                 }
             } else {
                 morse.interp(&msg);
