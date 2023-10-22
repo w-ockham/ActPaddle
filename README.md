@@ -35,7 +35,7 @@ ActPaddleはiPhoneのテザリングやモバイルルータに接続するこ�
 
 次にブラウザから`https://actpaddle.local/`にアクセスします。すると以下の設定画面があらわれます。
 
-![設定画面](images/config-dialog.jpg "設定画面")
+![設定画面](images/config-dialog.png "設定画面")
 
 ActPaddleの周りにあるアクセスポイントのSSIDの一覧がプルダウンメニューで表示されます。パスワード保存済みのSSIDは"o"が、未保存のものは"x"がついています。
 
