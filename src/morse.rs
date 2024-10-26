@@ -1,4 +1,4 @@
-use embedded_hal::digital::v2::OutputPin;
+use embedded_hal::digital::OutputPin;
 #[cfg(not(feature = "precision_delay"))]
 use esp_idf_hal::delay::Delay;
 use log::*;
