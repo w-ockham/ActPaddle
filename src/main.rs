@@ -4,15 +4,15 @@ use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_svc::eventloop::*;
 use esp_idf_svc::log::EspLogger;
 use log::*;
-#[cfg(any(board = "m5atom", board = "m5stamp"))]
+#[cfg(any(feature = "m5atom", feature = "m5stamp"))]
 use smart_leds::SmartLedsWrite;
 use std::io::stdin;
 use std::sync::mpsc;
 use std::thread;
 
-#[cfg(any(board = "m5atom", board = "m5stamp"))]
+#[cfg(any(feature = "m5atom", feature = "m5stamp"))]
 use ws2812_esp32_rmt_driver::driver::color::LedPixelColorGrbw32;
-#[cfg(any(board = "m5atom", board = "m5stamp"))]
+#[cfg(any(feature = "m5atom", feature = "m5stamp"))]
 use ws2812_esp32_rmt_driver::{LedPixelEsp32Rmt, RGB8};
 
 mod morse;
@@ -78,38 +78,41 @@ fn main() -> Result<()> {
     let peripherals = Peripherals::take().unwrap();
     let sysloop = EspSystemEventLoop::take()?;
 
-    #[cfg(board = "m5atom")]
+    #[cfg(feature = "m5atom")]
     let di = PinDriver::output(peripherals.pins.gpio33)?;
-    #[cfg(board = "m5atom")]
+    #[cfg(feature = "m5atom")]
     let dah = PinDriver::output(peripherals.pins.gpio23)?;
-    #[cfg(board = "m5atom")]
-    const LED_PIN: u32 = 27;
+    #[cfg(feature = "m5atom")]
+    let led_pin = peripherals.pins.gpio27;
 
-    #[cfg(board = "m5stamp")]
+    #[cfg(feature = "m5stamp")]
     let di = PinDriver::output(peripherals.pins.gpio4)?;
-    #[cfg(board = "m5stamp")]
+    #[cfg(feature = "m5stamp")]
     let dah = PinDriver::output(peripherals.pins.gpio3)?;
-    #[cfg(board = "m5stamp")]
-    const LED_PIN: u32 = 2;
+    #[cfg(feature = "m5stamp")]
+    let led_pin = peripherals.pins.gpio2;
 
-    #[cfg(any(board = "m5atom", board = "m5stamp"))]
-    let mut led = LedPixelEsp32Rmt::<RGB8, LedPixelColorGrbw32>::new(0, LED_PIN).unwrap();
-    #[cfg(any(board = "m5atom", board = "m5stamp"))]
+    #[cfg(any(feature = "m5atom", feature = "m5stamp"))]
+    let channel = peripherals.rmt.channel0;
+
+    #[cfg(any(feature = "m5atom", feature = "m5stamp"))]
+    let mut led = LedPixelEsp32Rmt::<RGB8, LedPixelColorGrbw32>::new(channel, led_pin).unwrap();
+    #[cfg(any(feature = "m5atom", feature = "m5stamp"))]
     let empty_color = std::iter::repeat(RGB8::default()).take(1);
-    #[cfg(any(board = "m5atom", board = "m5stamp"))]
+    #[cfg(any(feature = "m5atom", feature = "m5stamp"))]
     let white_color = std::iter::repeat(RGB8 { r: 3, g: 3, b: 3 }).take(1);
-    #[cfg(any(board = "m5atom", board = "m5stamp"))]
+    #[cfg(any(feature = "m5atom", feature = "m5stamp"))]
     let red_color = std::iter::repeat(RGB8 { r: 5, g: 0, b: 0 }).take(1);
-    #[cfg(any(board = "m5atom", board = "m5stamp"))]
+    #[cfg(any(feature = "m5atom", feature = "m5stamp"))]
     let green_color = std::iter::repeat(RGB8 { r: 0, g: 5, b: 0 }).take(1);
-    #[cfg(any(board = "m5atom", board = "m5stamp"))]
+    #[cfg(any(feature = "m5atom", feature = "m5stamp"))]
     let yellow_color = std::iter::repeat(RGB8 { r: 3, g: 3, b: 0 }).take(1);
 
-    #[cfg(board = "xiao-esp32c3")]
+    #[cfg(feature = "xiao-esp32c3")]
     let di = PinDriver::output(peripherals.pins.gpio3)?;
-    #[cfg(board = "xiao-esp32c3")]
+    #[cfg(feature = "xiao-esp32c3")]
     let dah = PinDriver::output(peripherals.pins.gpio2)?;
-    #[cfg(board = "xiao-esp32c3")]
+    #[cfg(feature = "xiao-esp32c3")]
     let mut led = PinDriver::output(peripherals.pins.gpio4)?;
 
     let mut nvs = NVSkey::new("actpaddle")?;
@@ -136,41 +139,41 @@ fn main() -> Result<()> {
     wifi.add_event_handler(|state| {
         match state {
             WiFiState::Idle => {
-                #[cfg(any(board = "m5atom", board = "m5stamp"))]
+                #[cfg(any(feature = "m5atom", feature = "m5stamp"))]
                 let _ = led.write(empty_color.clone());
-                #[cfg(board = "xiao-esp32c3")]
+                #[cfg(feature = "xiao-esp32c3")]
                 let _ = led.set_low();
             }
             WiFiState::Halt => {
-                #[cfg(any(board = "m5atom", board = "m5stamp"))]
+                #[cfg(any(feature = "m5atom", feature = "m5stamp"))]
                 let _ = led.write(red_color.clone());
-                #[cfg(board = "xiao-esp32c3")]
+                #[cfg(feature = "xiao-esp32c3")]
                 let _ = led.set_high();
             }
             WiFiState::Started => {
-                #[cfg(any(board = "m5atom", board = "m5stamp"))]
+                #[cfg(any(feature = "m5atom", feature = "m5stamp"))]
                 let _ = led.write(white_color.clone());
-                #[cfg(board = "xiao-esp32c3")]
+                #[cfg(feature = "xiao-esp32c3")]
                 let _ = led.set_high();
             }
             WiFiState::Connected => {
-                #[cfg(any(board = "m5atom", board = "m5stamp"))]
+                #[cfg(any(feature = "m5atom", feature = "m5stamp"))]
                 let _ = led.write(green_color.clone());
-                #[cfg(board = "xiao-esp32c3")]
+                #[cfg(feature = "xiao-esp32c3")]
                 let _ = led.set_low();
             }
             WiFiState::IfUpAp => {
-                #[cfg(any(board = "m5atom", board = "m5stamp"))]
+                #[cfg(any(feature = "m5atom", feature = "m5stamp"))]
                 let _ = led.write(yellow_color.clone());
-                #[cfg(board = "xiao-esp32c3")]
+                #[cfg(feature = "xiao-esp32c3")]
                 let _ = led.set_low();
             }
             WiFiState::IfUpClient => {
-              #[cfg(any(board = "m5atom", board = "m5stamp"))]
-              let _ = led.write(green_color.clone());
-              #[cfg(board = "xiao-esp32c3")]
-              let _ = led.set_low();
-          }
+                #[cfg(any(feature = "m5atom", feature = "m5stamp"))]
+                let _ = led.write(green_color.clone());
+                #[cfg(feature = "xiao-esp32c3")]
+                let _ = led.set_low();
+            }
         };
         None
     });
@@ -205,7 +208,11 @@ fn main() -> Result<()> {
     loop {
         wifi.wifi_loop()?;
         if let Ok(msg) = rx.recv() {
-            if msg.ssid.is_some() || msg.del_ssid.is_some() || msg.ssidlist.is_some() || msg.init.is_some(){
+            if msg.ssid.is_some()
+                || msg.del_ssid.is_some()
+                || msg.ssidlist.is_some()
+                || msg.init.is_some()
+            {
                 if let Some(ssid) = msg.ssid {
                     if let Some(password) = msg.password {
                         if !password.is_empty() {
@@ -234,8 +241,8 @@ fn main() -> Result<()> {
                     tx2.send(k)?;
                 }
                 if msg.init.is_some() {
-                  nvs.clear()?;
-                  info!("Clear all SSID");
+                    nvs.clear()?;
+                    info!("Clear all SSID");
                 }
             } else {
                 morse.interp(&msg);

@@ -13,7 +13,7 @@ use std::time::Duration;
 pub fn spawn_server(
     tx: Sender<KeyerParam>,
     rx: Receiver<KeyerParam>,
-) -> Result<Box<EspHttpServer>> {
+) -> Result<Box<EspHttpServer<'static>>> {
     let server_cert_bytes: Vec<u8> = include_bytes!("../cert/private/cacert.pem").to_vec();
     let private_key_bytes: Vec<u8> = include_bytes!("../cert/private/prvtkey.pem").to_vec();
 
@@ -30,22 +30,22 @@ pub fn spawn_server(
 
     server_config.server_certificate = Some(server_cert);
     server_config.private_key = Some(private_key);
-    let mut server = Box::new(EspHttpServer::new(&server_config)?);
+    let mut server = EspHttpServer::new(&server_config)?;
 
     server
-        .fn_handler("/", Method::Get, |req| {
+        .fn_handler::<anyhow::Error, _>("/", Method::Get, |req| {
             let html = index_html();
             req.into_ok_response()?.write_all(html.as_bytes())?;
             Ok(())
         })?
-        .fn_handler("/play", Method::Options, move |req| {
+        .fn_handler::<anyhow::Error, _>("/play", Method::Options, move |req| {
             req.into_response(204, None, cors_headers)?
                 .write("".as_bytes())?;
             Ok(())
         })?
-        .fn_handler("/play", Method::Post, move |mut req| {
+        .fn_handler::<anyhow::Error, _>("/play", Method::Post, move |mut req| {
             let mut buffer = [0u8; 256];
-            let mut mesg  = String::new();
+            let mut mesg = String::new();
             if let Ok(size) = req.read(&mut buffer[0..255]) {
                 let body = String::from_utf8(buffer[0..size].to_vec()).unwrap();
                 let param = serde_json::from_str::<KeyerParam>(&body);
@@ -53,7 +53,7 @@ pub fn spawn_server(
                     if js.ssidlist.is_some() {
                         tx.send(js)?;
                         if let Ok(ssids) = rx.recv_timeout(Duration::from_secs(10)) {
-                          mesg = serde_json::to_string(&ssids).unwrap();
+                            mesg = serde_json::to_string(&ssids).unwrap();
                         }
                     } else {
                         tx.send(js)?;
@@ -64,10 +64,11 @@ pub fn spawn_server(
             } else {
                 info!("Request read error.");
             }
-            req.into_response(200, Some("OK"), cors_headers)?.write_all(mesg.as_bytes())?;
+            req.into_response(200, Some("OK"), cors_headers)?
+                .write_all(mesg.as_bytes())?;
             Ok(())
         })?;
-    Ok(server)
+    Ok(Box::new(server))
 }
 
 fn convert_certificate(mut certificate_bytes: Vec<u8>) -> X509<'static> {
@@ -87,7 +88,7 @@ fn convert_certificate(mut certificate_bytes: Vec<u8>) -> X509<'static> {
 }
 
 fn index_html() -> String {
-      r##"
+    r##"
     <html>
   <head>
     <meta charset="UTF-8">

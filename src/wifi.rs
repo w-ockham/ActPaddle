@@ -100,9 +100,9 @@ where
         });
 
         let ap_conf = AccessPointConfiguration {
-            ssid: self.ap_ssid.into(),
+            ssid: self.ap_ssid.try_into().unwrap(),
             ssid_hidden: false,
-            password: self.ap_pass.into(),
+            password: self.ap_pass.try_into().unwrap(),
             auth_method: AuthMethod::WPA2Personal,
             ..Default::default()
         };
@@ -119,8 +119,8 @@ where
                 .unwrap()
                 .as_str();
             stn_conf = ClientConfiguration {
-                ssid: ssid.into(),
-                password: passwd.into(),
+                ssid: ssid.try_into().unwrap(),
+                password: passwd.try_into().unwrap(),
                 channel: Some(ap.channel),
                 ..Default::default()
             }
