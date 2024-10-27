@@ -213,11 +213,28 @@ sudo apt-get install -y gcc build-essential curl pkg-config
 cargo install espup
 espup install
 ```
+またボードへの書き込みやテストで用いる、フラッシュメモリ書込ツール`espflash`と、シリアルモニタ`espmonitor`もインストールしてください。
+```
+cargo install espflash
+cargo install espmonitor
+```
 これでESP32系のXtensa.ESP32C3のRISC-Vのクロスコンパイル環境がインストールされます。
 
-ActPaddleをコンパイルする際はターゲットを`.cargo/config.toml`で指定します。またrustflagsで`board`というfeatureを使ってボード毎のピンアサインを変更しています。ターゲット変更時にはこちらも修正漏れがないようにしてください。
+ActPaddleをコンパイルする際には使用するボードを`Config.toml`のfeatureで指定します。featureセクションのdefaultに`m5atom`,`m5stamp`,`xiao-esp32c3`のいずれかを設定してください。
 
-またESP-IDFは4系の最新版v4.4.5(2023/9/16現在)を使っています。初期設定をボード毎に変更する必要があるため、環境変数’ESP_IDF_SDKCONFIG_DEFAULTS'でXtensa用(`sdkconfig.defaults.esp32`), RISC-V用(`sdkconfig.defaults.esp`)を選択してください。
+```toml
+[features]
+default = ["native", "precision_delay", "m5atom"]
+native = ["esp-idf-sys/native"]
+precision_delay = []
+m5atom = []
+m5stamp = []
+xiao-esp32c3 = []
+```
+
+次にボードに合わせてターゲットとなるプロセッサを`.cargo/config.toml`の`build`セクションにある`target`で指定してください。M5ATOMはXtensa、M5StampやXIAO ESP32C3はRISC-Vとなります。
+
+またESP32の開発環境ESP-IDFは5系の最新版v5.2.2(2024/19/27現在)を使っています。ボード毎に初期設定を変更する必要があるため、環境変数’ESP_IDF_SDKCONFIG_DEFAULTS'にXtensa用(`sdkconfig.defaults.esp32`), RISC-V用(`sdkconfig.defaults.esp`)のいずれかを選択してください。
 
 ```toml
 [build]
@@ -226,25 +243,21 @@ target = "xtensa-esp32-espidf"
 
 [target.riscv32imc-esp-espidf]
 linker = "ldproxy"
-# runner = "espflash --monitor" # Select this runner for espflash v1.x.x
+rustflags = ["--cfg", "espidf_time64", "-C", "default-linker-libraries"]
 runner = "espflash flash --monitor" # Select this runner for espflash v2.x.x
-#rustflags = ["-C", "default-linker-libraries", "--cfg", "board=\"m5stamp\""]
-rustflags = ["-C", "default-linker-libraries", "--cfg", "board=\"xiao-esp32c3\""]
-
 [target.xtensa-esp32-espidf]
 linker = "ldproxy"
-# runner = "espflash --monitor" # Select this runner for espflash v1.x.x
 runner = "espflash flash --monitor" # Select this runner for espflash v2.x.x
-rustflags = ["-C", "default-linker-libraries", "--cfg", "board=\"m5atom\""]
+rustflags = ["--cfg", "espidf_time64", "-C", "default-linker-libraries"]
 
 [unstable]
 build-std = ["std", "panic_abort"]
 
 [env]
 # Note: these variables are not used when using pio builder (`cargo build --features pio`)
-ESP_IDF_VERSION = "v4.4.5"
-ESP_IDF_SDKCONFIG_DEFAULTS = "sdkconfig.defaults.esp32" 
-#ESP_IDF_SDKCONFIG_DEFAULTS = "sdkconfig.defaults.esp" 
+ESP_IDF_VERSION = { value = "tag:v5.2.2" }
+ESP_IDF_SDKCONFIG_DEFAULTS = "sdkconfig.defaults.esp32"
+#ESP_IDF_SDKCONFIG_DEFAULTS = "sdkconfig.defaults.esp"
 ````
 ### サーバー証明書・サーバ秘密鍵の生成
 WiFi版のActPaddleはChrome上のJavascriptからhttpsを使ってアクセスされます。そのためhttpsサーバのサーバー証明書・サーバー秘密鍵をコンパイル時にコード中に埋め込んでいます。ここではサーバー証明書・サーバー秘密鍵の作り方を説明します。
