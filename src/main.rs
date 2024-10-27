@@ -122,12 +122,16 @@ fn main() -> Result<()> {
     let (tx, rx) = mpsc::channel::<KeyerParam>();
     let (tx2, rx2) = mpsc::channel::<KeyerParam>();
 
+    let mut default_ssid = None;
+
     if !CONFIG.stn_ssid.is_empty() {
         nvs.clear()?;
         nvs.set_ssid(CONFIG.stn_ssid, CONFIG.stn_pass)?;
+        default_ssid = Some(CONFIG.stn_ssid);
     }
 
     let saved_ap = nvs.get_ssid_list();
+
     let mut wifi = WiFiConnection::new(
         peripherals.modem,
         sysloop.clone(),
@@ -180,7 +184,7 @@ fn main() -> Result<()> {
 
     wifi.add_periodical_handler(|_| None);
 
-    wifi.wifi_start(None, saved_ap)?;
+    wifi.wifi_start(default_ssid, saved_ap)?;
 
     let tx_serial = tx.clone();
     let _server = spawn_server(tx, rx2);

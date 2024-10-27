@@ -24,6 +24,7 @@ impl NVSkey {
             self.nvs.set_str(&ssidkey, "")?;
             self.nvs.set_str(&passwdkey, "")?;
         }
+        info!("Clear NVS memory.");
         Ok(())
     }
 
@@ -50,11 +51,11 @@ impl NVSkey {
             let ssidkey = format!("ssid{}", n);
             let passwdkey = format!("passwd{}", n);
             if let Some(nvs_ssid) = self.get_value(&ssidkey) {
-                if nvs_ssid == ssid  {
-                  info!("Clear SSID");
-                  self.nvs.set_str(&ssidkey, "")?;
-                  self.nvs.set_str(&passwdkey, "")?;
-                  return Ok(());
+                if nvs_ssid == ssid {
+                    info!("Clear SSID");
+                    self.nvs.set_str(&ssidkey, "")?;
+                    self.nvs.set_str(&passwdkey, "")?;
+                    return Ok(());
                 }
             }
         }
@@ -69,7 +70,7 @@ impl NVSkey {
                 if ssid.is_empty() {
                     self.nvs.set_str(&ssidkey, new_ssid)?;
                     self.nvs.set_str(&passwdkey, new_passwd)?;
-                    info!("Set new SSID");
+                    info!("Set new SSID {}", new_ssid);
                     return Ok(());
                 } else if ssid == new_ssid {
                     if !new_passwd.is_empty() {
@@ -91,9 +92,7 @@ impl NVSkey {
         if self.nvs.str_len(key).unwrap().is_some() {
             let mut buffer: [u8; MAX_STR_LEN] = [0; MAX_STR_LEN];
             if let Some(v) = self.nvs.get_str(key, &mut buffer).unwrap() {
-                let mut v = v.to_string();
-                v.pop();
-                Some(v)
+                Some(v.to_string())
             } else {
                 None
             }
