@@ -98,6 +98,7 @@ where
                         .contains_key(&a.ssid.to_string())
             }
         });
+        info!("Ap candidates = {:?}", candidate);
 
         let ap_conf = AccessPointConfiguration {
             ssid: self.ap_ssid.try_into().unwrap(),
